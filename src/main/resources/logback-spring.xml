@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Logs del microservicio ms-compras.
+  - Consola: para desarrollo.
+  - Archivo: rolling diario, ruta configurable con LOG_DIR (default ./logs).
+  Niveles por capa (requisito de la rubrica):
+    - controller: INFO (requests entrantes/salientes)
+    - service:    INFO/DEBUG (pasos de la logica de negocio)
+    - repository: DEBUG (SQL, via org.hibernate.SQL en application.yml)
+-->
+<configuration>
+
+    <property name="LOG_DIR" value="${LOG_DIR:-./logs}"/>
+    <property name="LOG_PATTERN"
+              value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"/>
+
+    <!-- Consola (desarrollo) -->
+    <appender name="CONSOLA" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${LOG_PATTERN}</pattern>
+        </encoder>
+    </appender>
+
+    <!-- Archivo con rolling diario -->
+    <appender name="ARCHIVO" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_DIR}/ms-compras.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <!-- Rotacion diaria; conserva 14 dias de historico -->
+            <fileNamePattern>${LOG_DIR}/ms-compras.%d{yyyy-MM-dd}.log</fileNamePattern>
+            <maxHistory>14</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>${LOG_PATTERN}</pattern>
+        </encoder>
+    </appender>
+
+    <logger name="com.alquilereventos.compras.controller" level="INFO"/>
+    <logger name="com.alquilereventos.compras.service" level="DEBUG"/>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLA"/>
+        <appender-ref ref="ARCHIVO"/>
+    </root>
+
+</configuration>

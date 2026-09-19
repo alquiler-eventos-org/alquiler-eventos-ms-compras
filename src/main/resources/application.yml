@@ -1,0 +1,37 @@
+spring:
+  application:
+    name: alquiler-eventos-ms-compras
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      # Liquibase es el UNICO que modifica la BD; Hibernate solo valida.
+      ddl-auto: validate
+    open-in-view: false
+  liquibase:
+    # El changelog vive DENTRO del JAR common (no se duplica aca).
+    change-log: classpath:db/changelog/db.changelog-master.yaml
+
+server:
+  port: ${SERVER_PORT:8082}
+  servlet:
+    context-path: ${API_CONTEXT_PATH:/api}
+
+# Valores por defecto de paginacion (todo configurable, nada quemado en codigo).
+app:
+  pagination:
+    default-page: ${DEFAULT_PAGE:0}
+    default-page-size: ${DEFAULT_PAGE_SIZE:10}
+
+logging:
+  config: ${LOGGING_CONFIG:classpath:logback-spring.xml}
+  level:
+    com.alquilereventos.compras: ${LOG_LEVEL_APP:INFO}
+    org.hibernate.SQL: ${LOG_LEVEL_SQL:DEBUG}
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
