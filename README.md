@@ -76,6 +76,35 @@ mvn clean install
 
 ---
 
+## Pruebas
+
+### Tests automatizados (53 tests)
+
+```bash
+mvn test
+```
+
+Cobertura:
+
+- **Mappers**: mapeo bidireccional Entidad <-> DTO (Proveedor, OrdenCompra y detalles).
+- **Services** (con Mockito): calculo de subtotales/total en el servidor, validaciones
+  de detalles, transiciones de estado permitidas/prohibidas, suma de stock al recibir,
+  historial y borrado logico.
+- **Controllers** (con MockMvc): codigos HTTP 200/201/400/404, formato JSON y el
+  manejo centralizado de errores con el DTO `ApiError`.
+
+### Pruebas manuales con Swagger UI
+
+Con la aplicacion corriendo, abrir:
+
+<http://localhost:8082/api/swagger-ui.html>
+
+La API fue probada end-to-end contra PostgreSQL (Supabase): CRUD completo de
+proveedores, ciclo de vida de ordenes (PENDIENTE -> CONFIRMADA -> RECIBIDA con
+suma de stock verificada en BD), anulacion de ordenes y errores de negocio.
+
+---
+
 ## Endpoints
 
 Base path: `/api` (configurable con `API_CONTEXT_PATH`).
@@ -98,7 +127,7 @@ Base path: `/api` (configurable con `API_CONTEXT_PATH`).
 | `POST` | `/ordenes-compra` | 201 / 400 | Crear con detalles (valida proveedor y equipos, calcula subtotal/total) |
 | `PUT` | `/ordenes-compra/{id}` | 200 / 400 / 404 | Actualizar (solo si esta `PENDIENTE`) |
 | `GET` | `/ordenes-compra/{id}` | 200 / 404 | Obtener por id (con detalles) |
-| `GET` | `/ordenes-compra?estado=&proveedorId=&fechaDesde=&fechaHasta=&page&size` | 200 | Buscar con filtros |
+| `GET` | `/ordenes-compra?page&size` | 200 | Listar ordenes (paginado) |
 | `DELETE` | `/ordenes-compra/{id}` | 200 / 400 / 404 | Borrado logico: estado `ANULADA` (solo si `PENDIENTE`) |
 | `PUT` | `/ordenes-compra/{id}/estado` | 200 / 400 / 404 | Cambiar estado (registra historial) |
 
