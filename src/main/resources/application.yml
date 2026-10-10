@@ -1,6 +1,8 @@
 spring:
   application:
-    name: alquiler-eventos-ms-compras
+    # Nombre con el que se registra en Eureka (debe coincidir con la ruta lb://
+    # del API Gateway). Todo configurable, nada quemado en codigo.
+    name: ${APP_NAME:ms-compras}
   datasource:
     url: ${DB_URL}
     username: ${DB_USER}
@@ -20,11 +22,32 @@ server:
   servlet:
     context-path: ${API_CONTEXT_PATH:/api}
 
+# ---------- Registro en Eureka (descubrimiento dinamico) ----------
+eureka:
+  client:
+    # Se puede desactivar con EUREKA_ENABLED=false para correr sin Eureka
+    enabled: ${EUREKA_ENABLED:true}
+    service-url:
+      defaultZone: ${EUREKA_DEFAULT_ZONE:http://localhost:8761/eureka/}
+  instance:
+    # prefer-ip-address=false hace que Eureka muestre http://<hostname>:8082
+    prefer-ip-address: ${EUREKA_PREFER_IP:true}
+    # Heartbeats acelerados para demos: una instancia caida desaparece rapido
+    lease-renewal-interval-in-seconds: ${EUREKA_RENEWAL_INTERVAL:5}
+    lease-expiration-duration-in-seconds: ${EUREKA_EXPIRATION:15}
+
 # Valores por defecto de paginacion (todo configurable, nada quemado en codigo).
 app:
   pagination:
     default-page: ${DEFAULT_PAGE:0}
     default-page-size: ${DEFAULT_PAGE_SIZE:10}
+  # Metadatos de OpenAPI: permiten que el "Try it out" del Swagger pegue contra
+  # el API Gateway (http://localhost:8080/api) en vez de al microservicio
+  # directo. Si no se define, queda con su propia URL (modo standalone).
+  openapi:
+    server-url: ${OPENAPI_SERVER_URL:http://localhost:8082/api}
+    title: ${OPENAPI_TITLE:MS Compras - Proveedores y Ordenes de Compra}
+    description: ${OPENAPI_DESCRIPTION:Microservicio de compras (entrega 2) del sistema de alquiler de equipos para eventos}
 
 logging:
   config: ${LOGGING_CONFIG:classpath:logback-spring.xml}
