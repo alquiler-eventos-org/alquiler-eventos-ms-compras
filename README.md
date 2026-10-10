@@ -96,6 +96,8 @@ Todo cambio de estado queda registrado en un HISTORIAL auditable.
 | `DB_URL` | URL JDBC de PostgreSQL (Supabase) | `jdbc:postgresql://host:5432/postgres` |
 | `DB_USER` | Usuario de la BD | `postgres` |
 | `DB_PASSWORD` | Contrasena de la BD | `***` |
+| `DB_POOL_MAX_SIZE` | Tamano maximo del pool Hikari de conexiones (default `3`) | `3` |
+| `DB_POOL_MIN_IDLE` | Conexiones minimas en reposo del pool Hikari (default `1`) | `1` |
 | `SERVER_PORT` | Puerto HTTP (default `8082`) | `8082` |
 | `API_CONTEXT_PATH` | Context path (default `/api`) | `/api` |
 | `APP_NAME` | Nombre de servicio en Eureka (default `ms-compras`) | `ms-compras` |
