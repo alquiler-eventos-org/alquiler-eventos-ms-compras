@@ -36,8 +36,8 @@ eureka:
     service-url:
       defaultZone: ${EUREKA_DEFAULT_ZONE:http://localhost:8761/eureka/}
   instance:
-    # prefer-ip-address=false hace que Eureka muestre http://<hostname>:8082
-    prefer-ip-address: ${EUREKA_PREFER_IP:true}
+    # false = se registra con el hostname (responde bien en local).
+    prefer-ip-address: ${EUREKA_PREFER_IP:false}
     # Heartbeats acelerados para demos: una instancia caida desaparece rapido
     lease-renewal-interval-in-seconds: ${EUREKA_RENEWAL_INTERVAL:5}
     lease-expiration-duration-in-seconds: ${EUREKA_EXPIRATION:15}

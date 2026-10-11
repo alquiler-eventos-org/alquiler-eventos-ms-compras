@@ -1,333 +1,227 @@
-# alquiler-eventos-ms-compras
+# ms-compras — Microservicio de Compras
 
-Microservicio de **compras** del sistema *Alquiler de Equipos para Eventos*.
-Gestiona **proveedores** y **ordenes de compra** (con detalles M:N hacia `Equipo`,
-historial de estados y suma de stock), exponiendo todo como API REST documentada
-con Swagger (OpenAPI).
-
-> **Este README es autocontenido**: explica el contexto general del sistema, el
-> rol de este microservicio y como correrlo y probarlo paso a paso.
+> Sistema de Alquiler de Equipos para Eventos (FIUNI — Sistemas Web y Distribuidos, Entrega #2)
+> Microservicio desarrollado por **Setrini**. Comparte la base de datos y el modelo con `ms-alquiler` y `api-gateway` a través del JAR `common`.
 
 ---
 
-## 1. Contexto general del sistema (leer primero)
+## 1. Contexto general del sistema (lo que toda IA / nuevo integrante debe saber)
 
-El sistema completo es una aplicacion distribuida (microservicios) para una
-empresa que **alquila equipos para eventos** (sonido, iluminacion, mobiliario, etc.):
+El sistema **"Alquiler de Equipos para Eventos"** está dividido en **microservicios Java con Spring Boot** que se comunican a través de un **API Gateway** y se registran y descubren dinámicamente mediante **Eureka Server**. Todos los microservicios usan una **base de datos remota compartida (Supabase / PostgreSQL)** cuyo esquema se administra **exclusivamente con Liquibase en el módulo `alquiler-eventos-common`** (los microservicios solo `validate`, nunca modifican la BD).
 
-- **Entrega 1** — Un JAR compartido
-  [`alquiler-eventos-common`](https://github.com/alquiler-eventos-org/alquiler-eventos-common)
-  con las **entidades JPA**, **repositorios Spring Data**, **DTOs de la API**
-  (generados desde OpenAPI), el **changelog de Liquibase** y el mapeo de errores.
-  Este JAR no tiene logica de negocio ni endpoints: es la base comun.
-- **Entrega 2 (este repo)** — El **microservicio de compras**: API REST que usa
-  las entidades y repositorios del JAR common y agrega las reglas de negocio del
-  area de compras. Repositorios hermanos siguen el mismo patron
-  (`alquiler-eventos-ms-alquiler` para el area de alquiler, etc.).
-- **Base de datos** — Una sola PostgreSQL 17 en **Supabase**, compartida por todos
-  los microservicios. El esquema lo administra **unicamente Liquibase** (el
-  changelog vive dentro del JAR common); Hibernate solo valida (`ddl-auto: validate`).
+### Repos del sistema
 
-### Roles de usuario del sistema
-
-Cada microservicio atiende un rol:
-
-| Microservicio | Rol | Puede |
+| Repositorio | Puerto | Rol |
 |---|---|---|
-| **ms-compras (este)** | **Encargado de Compras** | ABM de proveedores, crear/confirmar/recibir/anular ordenes de compra |
-| ms-alquiler | Encargado de Alquiler | Gestionar clientes y ordenes de alquiler de equipos |
+| `alquiler-eventos-eureka` | 8761 | Servidor de registro y descubrimiento (Eureka) |
+| `alquiler-eventos-ms-alquiler` | 8081 | Microservicio de **alquiler**: Clientes y Órdenes de Alquiler |
+| `alquiler-eventos-ms-compras` (este repo) | 8082 | Microservicio de **compras**: Proveedores y Órdenes de Compra |
+| `alquiler-eventos-api-gateway` | 8080 | API Gateway (Spring Cloud Gateway): punto único de entrada, rutas por Eureka (`lb://`), Swagger unificado |
+| `alquiler-eventos-common` | — | JAR compartido: entidades JPA, DTOs, repositorios Spring Data y changelog Liquibase (mantiene la BD) |
+| `alquiler-eventos-ui` | 5173 | Frontend React (Vite) que consulta por el gateway |
 
-Flujo de negocio que cubre este microservicio:
+### Flujo de una petición (arquitectura en runtime)
 
 ```
-Se registra un PROVEEDOR  ->  se crea una ORDEN DE COMPRA (PENDIENTE)
-   ->  se CONFIRMA (queda comprometida, ya no se puede editar)
-   ->  se RECIBE (llega la mercaderia: se SUMA el stock de cada equipo)
-   ->  (o bien se ANULA si estaba PENDIENTE: borrado logico)
-Todo cambio de estado queda registrado en un HISTORIAL auditable.
+Cliente HTTP / Swagger / UI React
+        │
+        ▼
+API Gateway :8080   (ruta lb://ms-compras)   ← descubre la instancia via Eureka
+        │  /api/proveedores/**  /api/ordenes-compra/**
+        ▼
+Eureka :8761  ◄── heartbeats ──  ms-compras :8082  ──►  Supabase (PostgreSQL)
 ```
 
-### Decisiones tecnicas clave
-
-- **El servidor calcula los montos**: subtotales (`cantidad * costoUnitario`) y
-  total de la orden se calculan en el backend; el cliente no los envia.
-- **Borrado logico**: proveedores nunca se borran fisicamente, se marcan
-  `activo=false`; ordenes de compra se marcan `ANULADA`.
-- **Transiciones de estado controladas** (ver matriz en la seccion Endpoints).
-- **Manejo centralizado de errores**: toda respuesta de error usa el DTO
-  `ApiError` del JAR common y nunca expone stacktraces.
+- El gateway **no tiene IPs quemadas**: resuelve `lb://ms-compras` consultando a Eureka en runtime (descubrimiento dinámico).
+- La instancia se registra con `prefer-ip-address: false` para que el nombre de host sea resoluble en la misma máquina (evita timeouts por firewall).
+- Los microservicios tienen `context-path: /api` (configurable), por eso las rutas del gateway son `/api/proveedores` y `/api/ordenes-compra`.
 
 ---
 
-## 2. Stack
+## 2. Qué hace este microservicio (ms-compras)
 
-| Tecnologia | Version |
-|---|---|
-| Java | 21 (LTS, Temurin) |
-| Spring Boot | 3.4.5 |
-| PostgreSQL | 17 (Supabase, BD compartida con ms-alquiler) |
-| Liquibase | incluido en Spring Boot (changelog del JAR common) |
-| SpringDoc OpenAPI | 2.8.14 (2.6.0 es incompatible con Spring Boot 3.4; 2.8.15+ tiene el bug de /swagger-ui, issue springdoc #3210) |
-| Maven | 3.9+ |
+Expone la lógica de **compras de equipos a proveedores** para reposición de stock:
 
----
+1. **Proveedores** (`/api/proveedores`): CRUD completo + búsqueda paginada por nombre. Borrado lógico.
+2. **Órdenes de compra** (`/api/ordenes-compra`): flujo de compra con detalle por equipo, total calculado en el servidor, transiciones de estado válidas y registro de historial. Al `RECIBIDA` **suma stock** a los equipos. Borrado lógico (`ANULADA`).
 
-## 3. Requisitos previos
+### Entidades gestionadas (vienen del JAR `common`, sin modificar su definición)
 
-1. **JDK 21** y **Maven 3.9+**.
-2. Haber compilado e instalado el JAR common en el repo local de Maven:
-
-   ```bash
-   git clone https://github.com/alquiler-eventos-org/alquiler-eventos-common.git
-   cd alquiler-eventos-common
-   mvn clean install
-   ```
-
-3. Acceso a la BD (Supabase) y **datos de referencia cargados**: al menos un
-   `usuario` y unos `equipos` en la BD (los necesita la orden de compra; la tabla
-   `proveedores` puede arrancar vacia porque este servicio crea proveedores).
-
----
-
-## 4. Variables de entorno
-
-| Variable | Descripcion | Ejemplo |
+| Entidad | Tipo | Relación |
 |---|---|---|
-| `DB_URL` | URL JDBC de PostgreSQL (Supabase) | `jdbc:postgresql://host:5432/postgres` |
-| `DB_USER` | Usuario de la BD | `postgres` |
-| `DB_PASSWORD` | Contrasena de la BD | `***` |
-| `DB_POOL_MAX_SIZE` | Tamano maximo del pool Hikari de conexiones (default `3`) | `3` |
-| `DB_POOL_MIN_IDLE` | Conexiones minimas en reposo del pool Hikari (default `1`) | `1` |
-| `SERVER_PORT` | Puerto HTTP (default `8082`) | `8082` |
-| `API_CONTEXT_PATH` | Context path (default `/api`) | `/api` |
-| `APP_NAME` | Nombre de servicio en Eureka (default `ms-compras`) | `ms-compras` |
-| `EUREKA_ENABLED` | Activa/desactiva el registro (default `true`) | `true` |
-| `EUREKA_DEFAULT_ZONE` | URL del Eureka Server (default `http://localhost:8761/eureka/`) | |
-| `EUREKA_RENEWAL_INTERVAL` | Heartbeat en segundos (default `5`) | `5` |
-| `OPENAPI_SERVER_URL` | URL que el Swagger usa en "Try it out" (default `http://localhost:8082/api`; para la demo apuntar al Gateway) | `http://localhost:8080/api` |
-| `LOG_DIR` | Carpeta de logs (default `./logs`) | `./logs` |
-| `LOGGING_CONFIG` | Config de logback (default `classpath:logback-spring.xml`) | |
-| `DEFAULT_PAGE` / `DEFAULT_PAGE_SIZE` | Paginacion por defecto (default `0` / `10`) | |
-| `LOG_LEVEL_APP` / `LOG_LEVEL_SQL` | Niveles de log de la app y del SQL (default `INFO` / `DEBUG`) | |
+| `Proveedor` | simple (`activo` para borrado lógico) | — |
+| `OrdenCompra` | maestro-detalle (orden ↔ equipos: many-to-many gestionada mediante la tabla intermedia `ordenes_compra_detalle`) | N proveedor / 1 usuario, N detalles con N equipos |
+| `OrdenCompraDetalle` | puente | `orden_compra_id` ↔ `equipo_id`, con `cantidad`, `costo_unitario`, `subtotal` |
+| `OrdenCompraHistorial` | auditoría | `estado_anterior` ↔ `estado_nuevo` por cambio de estado |
 
-> Las credenciales de la BD **nunca** se commitean: van por variables de entorno
-> (o en un `.env` local ignorado por git).
+### Reglas de negocio implementadas (`OrdenCompraServiceImpl`)
+
+- Estado inicial de una nueva orden: **`PENDIENTE`** (nunca se acepta otro en el POST).
+- El **total y los subtotales se calculan en el servidor** (`cantidad × costo_unitario`); el cliente no los envía.
+- Transiciones válidas: `PENDIENTE → CONFIRMADA`, `CONFIRMADA → RECIBIDA`, `PENDIENTE → ANULADA`. Cualquier otra da `400` con mensaje de negocio.
+- Al llegar a **`RECIBIDA`** se suma el stock de cada equipo (`equipo.stock += cantidad`).
+- **Borrado lógico**: solo se puede anular (`ANULADA`) una orden en `PENDIENTE`; el registro no se elimina físicamente de la BD compartida.
+- **Historial**: cada cambio de estado inserta una fila en `ordenes_compra_historial` con `estado_anterior`/`estado_nuevo` (hereda de `HistorialEstado` del common).
+- Proveedor debe existir y estar `activo` para asociarlo a una orden.
 
 ---
 
-## 5. Registro en Eureka y ejecucion via API Gateway
-
-Este microservicio se registra en el **Eureka Server** con el nombre
-`MS-COMPRAS` (configurable con `APP_NAME`). Cuando el Eureka Server esta
-arriba (`http://localhost:8761`), la instancia aparece en el panel con estado
-`UP` automaticamente.
-
-Para la demo completa se levantan, en orden:
-
-```bash
-# 1. Eureka Server (puerto 8761)
-cd alquiler-eventos-eureka && mvn spring-boot:run
-
-# 2. Este microservicio (puerto 8082) -- se registra solo en Eureka
-cd alquiler-eventos-ms-compras && mvn spring-boot:run
-
-# 3. API Gateway (puerto 8080) -- enruta via lb://ms-compras usando Eureka
-cd alquiler-eventos-api-gateway && mvn spring-boot:run
-```
-
-A partir de eso, TODOS los endpoints se prueban desde el Swagger unificado del
-Gateway o desde el Swagger del propio microservicio, segun como se levante:
-
-- **Swagger del API Gateway**: <http://localhost:8080/swagger-ui.html>
-  (desplegable con la documentacion de `ms-compras`, datos en
-  `/compras/v3/api-docs`).
-- Para que las pruebas del Swagger peguen al Gateway (y no al microservicio
-  directo), al levantar ms-compras se define
-  `OPENAPI_SERVER_URL=http://localhost:8080/api`; si no se define, cada
-  microservicio sirve su documentacion standalone con su propia URL.
-- Tambien es posible seguir probando standalone: <http://localhost:8082/api/swagger-ui.html>
-
-El ruteo es **dinamico via Eureka** (balanceo `lb://`), sin IPs fijas: si
-ms-compras cambia de puerto/host, el Gateway lo resuelve solo.
-
-## 5.bis. Como correr (standalone)
-
-```bash
-# con las variables DB_URL, DB_USER y DB_PASSWORD definidas
-mvn spring-boot:run
-```
-
-Al arrancar:
-
-- **Liquibase** aplica los changeSets pendientes del changelog del JAR common
-  (la primera corrida agrega las columnas `activo` a `proveedores` y `clientes`).
-- **Hibernate** valida las 16 entidades contra el esquema (`ddl-auto: validate`).
-- Swagger UI queda en: <http://localhost:8082/api/swagger-ui.html>
-
-Compilar y verificar (debe pasar antes de cada commit):
-
-```bash
-mvn clean install
-```
-
----
-
-## 6. Pruebas
-
-### 6.1 Tests automatizados (53 tests)
-
-```bash
-mvn test
-```
-
-Cobertura:
-
-- **Mappers**: mapeo bidireccional Entidad <-> DTO (Proveedor, OrdenCompra y detalles).
-- **Services** (con Mockito): calculo de subtotales/total en el servidor, validaciones
-  de detalles, transiciones de estado permitidas/prohibidas, suma de stock al recibir,
-  historial y borrado logico.
-- **Controllers** (con MockMvc): codigos HTTP 200/201/400/404, formato JSON y el
-  manejo centralizado de errores con el DTO `ApiError`.
-
-### 6.2 Guia de pruebas manuales con Swagger UI (paso a paso)
-
-Con la aplicacion corriendo, abrir:
-
-**<http://localhost:8082/api/swagger-ui.html>**
-
-(El JSON de OpenAPI esta en <http://localhost:8082/api/v3/api-docs>.)
-
-Para probar end-to-end se necesita en la BD: un `usuario` valido (id numerico) y
-uno o mas `equipos` (ids numericos). Los pasos:
-
-**Paso 1 — Crear un proveedor** (`POST /api/proveedores`, boton *Try it out*):
-
-```json
-{
-  "nombre": "Eventos Sonido SA",
-  "contacto": "Juan Perez",
-  "telefono": "+5491122334455",
-  "email": "ventas@eventossound.com",
-  "direccion": "Av. Siempre Viva 742"
-}
-```
-
-Respuesta esperada: **201** con el DTO `Proveedor` (incluye `id` y `activo: true`).
-Anotar el `id`. Probar tambien el caso de error: enviar `email` invalido -> **400**.
-
-**Paso 2 — Verificar listado y busqueda**:
-
-- `GET /api/proveedores?page=0&size=10` -> **200**, solo activos, paginado.
-- `GET /api/proveedores/buscar?nombre=sonido` -> **200**, filtro por nombre/email/contacto.
-
-**Paso 3 — Crear una orden de compra** (`POST /api/ordenes-compra`), usando el
-`id` del proveedor del Paso 1 y un `usuarioId` + `equipoId` existentes en la BD:
-
-```json
-{
-  "proveedorId": 1,
-  "usuarioId": 1,
-  "fechaCompra": "2026-09-20",
-  "detalles": [
-    { "equipoId": 1, "cantidad": 5, "costoUnitario": 150.0 },
-    { "equipoId": 2, "cantidad": 2, "costoUnitario": 400.0 }
-  ]
-}
-```
-
-Respuesta esperada: **201**. El servidor calcula subtotales (750 y 800) y
-**total: 1550**; el estado inicial es `PENDIENTE`. Anotar el `id` de la orden.
-Casos de error a probar: proveedor inexistente/inactivo -> **400**; detalles
-vacios o cantidad <= 0 -> **400**.
-
-**Paso 4 — Ciclo de vida de la orden** (`PUT /api/ordenes-compra/{id}/estado`),
-cuerpo `{"estado": "..."}`:
-
-1. `CONFIRMADA` -> **200** (ya no se puede editar: probar `PUT /api/ordenes-compra/{id}`
-   ahora -> **400** "Solo se puede modificar una orden en estado PENDIENTE").
-2. `RECIBIDA` -> **200** (suma el stock de cada equipo en la BD; verificar con
-   `SELECT stock FROM equipos WHERE id IN (1,2)` o en la tabla desde Supabase).
-3. Transicion invalida (ej. intentar `ANULADA` sobre una orden ya `RECIBIDA`)
-   -> **400** "Transicion de estado no permitida".
-
-**Paso 5 — Anulacion (borrado logico)**: crear otra orden y anularla con
-`DELETE /api/ordenes-compra/{id}` (solo funciona si esta `PENDIENTE` -> si no,
-**400**). La orden queda con estado `ANULADA`, no se borra fisicamente.
-
-**Paso 6 — Borrado logico de proveedor**: `DELETE /api/proveedores/{id}` ->
-**200**; el proveedor desaparece del listado pero sigue en la BD con
-`activo=false`. Buscarlo por id -> **404**.
-
-**Formato de todos los errores** (DTO `ApiError` del JAR common):
-
-```json
-{
-  "codigo": 404,
-  "mensaje": "Proveedor no encontrado: 99",
-  "ruta": "/api/proveedores/99",
-  "fecha": "2026-09-20T10:15:30Z"
-}
-```
-
-La API fue probada end-to-end contra PostgreSQL (Supabase): CRUD completo de
-proveedores, ciclo de vida de ordenes (PENDIENTE -> CONFIRMADA -> RECIBIDA con
-suma de stock verificada en BD), anulacion de ordenes y errores de negocio.
-
----
-
-## 7. Endpoints
-
-Base path: `/api` (configurable con `API_CONTEXT_PATH`).
-
-### Proveedores (`/api/proveedores`)
-
-| Metodo | Ruta | Codigos | Descripcion |
-|---|---|---|---|
-| `POST` | `/proveedores` | 201 / 400 | Crear proveedor |
-| `PUT` | `/proveedores/{id}` | 200 / 404 | Actualizar proveedor |
-| `GET` | `/proveedores/{id}` | 200 / 404 | Obtener por id |
-| `GET` | `/proveedores?page&size` | 200 | Listar (solo activos, paginado) |
-| `GET` | `/proveedores/buscar?nombre=&email=&contacto=&page&size` | 200 | Buscar con filtros |
-| `DELETE` | `/proveedores/{id}` | 200 / 404 | Borrado **logico** (`activo=false`) |
-
-### Ordenes de compra (`/api/ordenes-compra`)
-
-| Metodo | Ruta | Codigos | Descripcion |
-|---|---|---|---|
-| `POST` | `/ordenes-compra` | 201 / 400 | Crear con detalles (valida proveedor y equipos, calcula subtotal/total) |
-| `PUT` | `/ordenes-compra/{id}` | 200 / 400 / 404 | Actualizar (solo si esta `PENDIENTE`) |
-| `GET` | `/ordenes-compra/{id}` | 200 / 404 | Obtener por id (con detalles) |
-| `GET` | `/ordenes-compra?page&size` | 200 | Listar ordenes (paginado) |
-| `DELETE` | `/ordenes-compra/{id}` | 200 / 400 / 404 | Borrado logico: estado `ANULADA` (solo si `PENDIENTE`) |
-| `PUT` | `/ordenes-compra/{id}/estado` | 200 / 400 / 404 | Cambiar estado (registra historial) |
-
-Transiciones de estado validas:
-
-- `PENDIENTE -> CONFIRMADA`
-- `CONFIRMADA -> RECIBIDA` (suma stock al equipo por cada detalle)
-- `PENDIENTE -> ANULADA`
-
----
-
-## 8. Arquitectura
-
-Capas estrictas: **Controller -> Service -> Repository** (el controller nunca
-accede a un repository directamente). Los repositories vienen del JAR common.
+## 3. Arquitectura en capas (estricta: Controller → Service → Repository)
 
 ```
 com.alquilereventos.compras
-├── ComprasApplication.java
-├── controller/   ProveedorController, OrdenCompraController
-├── service/      ProveedorService, OrdenCompraService (interfaces + impl)
-├── mapper/       Mapper<E,D> (generico), ProveedorMapper, OrdenCompraMapper
-└── exception/    RecursoNoEncontradoException (404), ReglaNegocioException (400),
-                  ApiExceptionHandler (@RestControllerAdvice -> DTO ApiError)
+├── controller/          # @RestController: solo reciben HTTP y delegan.
+│   ├── ProveedorController      /api/proveedores        (6 endpoints)
+│   └── OrdenCompraController    /api/ordenes-compra     (6 endpoints)
+├── service/             # @Service: lógica de negocio, transacciones y validaciones.
+│   ├── ProveedorService / ProveedorServiceImpl
+│   └── OrdenCompraService / OrdenCompraServiceImpl
+├── mapper/              # Conversión bidireccional Entity <-> DTO.
+│   ├── Mapper<E,D>      (interfaz genérica: reutilización de código)
+│   ├── ProveedorMapper
+│   └── OrdenCompraMapper
+├── repository/          # Solo búsquedas específicas de este micro (el resto viene del common).
+│   └── ProveedorBusquedaRepository   (busca excluyendo borrado lógico)
+└── exception/           # Manejador global de excepciones (respuestas estandarizadas).
+```
+
+**Nunca** salta capas: el controller jamás llama a un repository; pasa por el service. Las entidades/DTOs usados son los del JAR `common` (`com.alquilereventos.common.*`), tal como exige la consigna (reutilización de Entrega #1).
+
+---
+
+## 4. Endpoints
+
+### `/api/proveedores`
+
+| Método | Path | Efecto | Códigos |
+|---|---|---|---|
+| POST | `/proveedores` | Crea proveedor (nombre obligatorio) | 201 / 400 |
+| PUT | `/proveedores/{id}` | Actualiza contacto/teléfono/email/dirección | 200 / 400 / 404 |
+| GET | `/proveedores/{id}` | Obtiene un proveedor activo | 200 / 404 |
+| GET | `/proveedores?page=&size=` | Lista paginada (excluye inactivos) | 200 |
+| GET | `/proveedores/buscar?nombre=&page=&size=` | Búsqueda paginada por nombre | 200 |
+| DELETE | `/proveedores/{id}` | **Borrado lógico** (`activo = false`) | 200 / 404 |
+
+### `/api/ordenes-compra`
+
+| Método | Path | Efecto | Códigos |
+|---|---|---|---|
+| POST | `/ordenes-compra` | Crea con detalles, calcula total, `PENDIENTE` + historial | 201 / 400 |
+| PUT | `/ordenes-compra/{id}` | Actualiza solo si `PENDIENTE` (reemplaza detalles) | 200 / 400 / 404 |
+| GET | `/ordenes-compra/{id}` | Obtiene con detalles | 200 / 404 |
+| GET | `/ordenes-compra?page=&size=` | Lista paginada (más recientes primero) | 200 |
+| PUT | `/ordenes-compra/{id}/estado` | Transición de estado + historial (+ stock si `RECIBIDA`) | 200 / 400 / 404 |
+| DELETE | `/ordenes-compra/{id}` | Borrado lógico → estado `ANULADA` (solo `PENDIENTE`) | 200 / 400 / 404 |
+
+### Cuerpos de ejemplo
+
+Crear proveedor:
+```json
+{ "nombre": "Distribuidora Sonido SA", "contacto": "Laura Perez", "telefono": "0981 123 456", "email": "ventas@distribuidorasonido.com", "direccion": "Av. Mcal. Lopez 1234" }
+```
+
+Crear orden de compra (se confirma y luego se recibe → suma stock):
+```json
+{ "proveedorId": 1, "usuarioId": 1, "fechaCompra": "2026-10-20", "detalles": [ { "equipoId": 1, "cantidad": 5, "costoUnitario": 150000 } ] }
+```
+Cambiar estado:
+```json
+{ "usuarioId": 1, "estado": "CONFIRMADA" }
 ```
 
 ---
 
-## 9. Estado del trabajo
+## 5. Manejo centralizado de errores
 
-1. **PASO 1** — Proyecto Maven/Spring Boot base (`pom.xml`, config, logs, README).
-2. **PASO 2** — CRUD de Proveedor (mapper + service + controller + excepciones).
-3. **PASO 3** — Ordenes de compra (detalles M:N, estados + historial, stock).
+`ApiExceptionHandler` (`@RestControllerAdvice`) intercepta:
+
+| Excepción | HTTP | Comportamiento |
+|---|---|---|
+| `RecursoNoEncontradoException` (controlada) | **404** | Respuesta estandarizada `ApiError` |
+| `ReglaNegocioException` (controlada) | **400** | Respuesta estandarizada `ApiError` |
+| Cualquier otra (no controlada) | **500** | `Mensaje genérico` sin stacktrace ni detalle técnico |
+
+Formato de respuesta de error (igual en ambos micros):
+```json
+{ "codigo": 404, "mensaje": "Proveedor no encontrado: 99999", "ruta": "/api/proveedores/99999", "fecha": "2026-10-11T15:26:27.2027928-03:00" }
+```
+
+## 6. Logs (SLF4J / Logback)
+
+- `logback-spring.xml` con rolling diario, ruta configurable con `LOG_DIR` (default `./logs`). Archivo: `logs/ms-compras.log`.
+- Niveles correctos por capa (parametrizables por env):
+  - `INFO` en **controller** (cada request, paths, parámetros).
+  - `INFO`/`DEBUG` en **service** (pasos de negocio, cálculos, cambios de estado).
+  - `DEBUG` en SQL (Hibernate).
+- `LOG_LEVEL_APP`, `LOG_LEVEL_SQL` y similares controlan el nivel en runtime.
+
+## 7. Configurabilidad (`src/main/resources/application.yml`)
+
+**TODO es configurable por variables de entorno o yml, nada está quemado en código:**
+
+| Variable | Default | Uso |
+|---|---|---|
+| `APP_NAME` | `ms-compras` | Nombre para registrar en Eureka (debe coincidir con `lb://` del gateway) |
+| `SERVER_PORT` | `8082` | Puerto HTTP |
+| `API_CONTEXT_PATH` | `/api` | Context path |
+| `DB_URL`, `DB_USER`, `DB_PASSWORD` | — (requeridas) | Conexión a Supabase |
+| `DB_POOL_MAX_SIZE` / `DB_POOL_MIN_IDLE` | `3` / `1` | Hikari (respeta límite del pooler de Supabase) |
+| `spring.liquibase.change-log` | `classpath:db/changelog/db.changelog-master.yaml` (vive en el JAR common) | Liquibase corre las migraciones desde el changelog del common; Hibernate solo valida (`ddl-auto: validate`) |
+| `EUREKA_ENABLED` | `true` | Permite correr sin Eureka si se necesita |
+| `EUREKA_DEFAULT_ZONE` | `http://localhost:8761/eureka/` | Dónde está Eureka |
+| `EUREKA_PREFER_IP` | **`false`** | `true` registra la IP de LAN (falla en local por firewall) |
+| `EUREKA_RENEWAL_INTERVAL` / `EUREKA_EXPIRATION` | `5` / `15` | Heartbeats acelerados para demos |
+
+## 8. Cómo correr
+
+```bash
+# Requisitos: JDK 17+, Maven, variables de entorno DB_URL/DB_USER/DB_PASSWORD seteadas.
+# En Windows (PowerShell) las variables ya están persistidas en el perfil del usuario.
+
+# 1) Instala primero el JAR common (si se actualizó):
+cd alquiler-eventos-common && git pull && mvn clean install
+
+# 2) En una terminal, arranca Eureka (recomendado como terminal 1):
+cd alquiler-eventos-eureka && mvn spring-boot:run
+
+# 3) En otra terminal, ms-alquiler:
+cd alquiler-eventos-ms-alquiler && mvn spring-boot:run
+
+# 4) En otra terminal, este micro (ms-compras):
+cd alquiler-eventos-ms-compras && mvn spring-boot:run
+
+# 5) Al final, gateway:
+cd alquiler-eventos-api-gateway && mvn spring-boot:run
+```
+
+Verificar: `http://localhost:8761` → `MS-COMPRAS` UP. Probar por gateway: `http://localhost:8080/api/proveedores?page=0&size=10` → 200.
+
+⚠️ Si Supabase está pausado (error `EMAXCONNSESSION` u `ENOTFOUND` en el arranque): darle "Resume project" en el dashboard.
+
+## 9. Tests
+
+```bash
+mvn test        # corre los unitarios de controller, service y mappers
+```
+
+Cobertura actual: `OrdenCompraControllerTest`, `ProveedorControllerTest`, `OrdenCompraServiceImplTest`, `ProveedorServiceImplTest`, `OrdenCompraMapperTest`, `ProveedorMapperTest`.
+
+## 10. Swagger
+
+Unificado desde el gateway: `http://localhost:8080/swagger-ui.html` → en el desplegable de arriba a la derecha, elegir **ms-compras** (o directo `/compras/v3/api-docs`).
+
+## 11. Mapeo a los criterios de evaluación (Entrega #2)
+
+| Criterio | Cómo lo cumple este micro |
+|---|---|
+| Respeto estricto de capas | Controllers → Service → Repository/Mapper. El repo del micro solo delega en el common. Sin saltos. |
+| Eureka | Self-registra (`APP_NAME:id`) via `EUREKA_DEFAULT_ZONE`; el gateway lo descubre con `lb://ms-compras` en runtime. |
+| Entidades simples via gateway | `Proveedor` probado por `http://localhost:8080/api/proveedores` (POST/GET/PUT/DELETE con paginación). |
+| Many-to-many via gateway | `OrdenCompra` ↔ `OrdenCompraDetalle` ↔ `Equipo` (`equipo_id` en cada detalle), probado por `http://localhost:8080/api/ordenes-compra`. |
+| Borrado lógico | `DELETE` marca `activo=false` (proveedor) o `estado=ANULADA` (orden). Nada físico. |
+| Manejo de fallos | `ApiExceptionHandler` → `ApiError` estandarizado; 500 genérico sin stacktrace. |
+| Logs | `logback-spring.xml` a disco; INFO controller, DEBUG service/SQL. |
+| Configurabilidad | `application.yml` 100% parametrizado por variables de entorno. |
+
+---
+*README regenerado el 2026-10-11 para reflejar el código real del repo.*
