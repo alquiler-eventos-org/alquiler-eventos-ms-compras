@@ -22,6 +22,8 @@ spring:
   liquibase:
     # El changelog vive DENTRO del JAR common (no se duplica aca).
     change-log: classpath:db/changelog/db.changelog-master.yaml
+    # Liquibase deshabilitado aca: las tablas ya se crean en ms-alquiler.
+    enabled: false
 
 server:
   port: ${SERVER_PORT:8082}
