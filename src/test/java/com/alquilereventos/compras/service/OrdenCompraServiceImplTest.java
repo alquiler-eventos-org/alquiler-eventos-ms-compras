@@ -75,6 +75,7 @@ class OrdenCompraServiceImplTest {
         com.alquilereventos.common.entity.Usuario u =
                 new com.alquilereventos.common.entity.Usuario();
         u.setId(id);
+        u.setActivo(true);
         return u;
     }
 
@@ -94,11 +95,10 @@ class OrdenCompraServiceImplTest {
         return detalle;
     }
 
-    private OrdenCompraCrearRequest request(Integer proveedorId, Integer usuarioId,
+    private OrdenCompraCrearRequest request(Integer proveedorId, Integer ignoredUsuarioId,
                                             List<OrdenCompraDetalle> detalles) {
         OrdenCompraCrearRequest request = new OrdenCompraCrearRequest();
         request.setProveedorId(proveedorId);
-        request.setUsuarioId(usuarioId);
         request.setDetalles(detalles);
         return request;
     }
@@ -122,7 +122,7 @@ class OrdenCompraServiceImplTest {
                 detalleDto(10, 2, 100.50),
                 detalleDto(11, 1, 50.00)));
 
-        OrdenCompra dto = service.crear(request);
+        OrdenCompra dto = service.crear(request, 2);
 
         assertEquals("PENDIENTE", dto.getEstado().name());
         assertEquals(2, dto.getDetalles().size());
@@ -135,7 +135,7 @@ class OrdenCompraServiceImplTest {
     @Test
     @DisplayName("crear: sin detalles lanza ReglaNegocioException")
     void crearSinDetalles() {
-        assertThrows(ReglaNegocioException.class, () -> service.crear(request(1, 2, List.of())));
+        assertThrows(ReglaNegocioException.class, () -> service.crear(request(1, 2, List.of()), 2));
         verify(ordenCompraRepository, never()).save(any());
     }
 
@@ -143,21 +143,21 @@ class OrdenCompraServiceImplTest {
     @DisplayName("crear: cantidad menor a 1 lanza ReglaNegocioException")
     void crearCantidadInvalida() {
         assertThrows(ReglaNegocioException.class, () -> service.crear(
-                request(1, 2, List.of(detalleDto(10, 0, 100.0)))));
+                request(1, 2, List.of(detalleDto(10, 0, 100.0))), 2));
     }
 
     @Test
     @DisplayName("crear: costo unitario menor o igual a cero lanza ReglaNegocioException")
     void crearCostoInvalido() {
         assertThrows(ReglaNegocioException.class, () -> service.crear(
-                request(1, 2, List.of(detalleDto(10, 1, 0.0)))));
+                request(1, 2, List.of(detalleDto(10, 1, 0.0))), 2));
     }
 
     @Test
     @DisplayName("crear: sin proveedorId lanza ReglaNegocioException")
     void crearSinProveedor() {
         assertThrows(ReglaNegocioException.class,
-                () -> service.crear(request(null, 2, List.of(detalleDto(10, 1, 10.0)))));
+                () -> service.crear(request(null, 2, List.of(detalleDto(10, 1, 10.0)), 2));
     }
 
     @Test
@@ -165,7 +165,7 @@ class OrdenCompraServiceImplTest {
     void crearProveedorInactivo() {
         when(proveedorRepository.findById(1)).thenReturn(Optional.of(proveedor(1, false)));
         assertThrows(ReglaNegocioException.class, () -> service.crear(
-                request(1, 2, List.of(detalleDto(10, 1, 10.0)))));
+                request(1, 2, List.of(detalleDto(10, 1, 10.0)), 2));
     }
 
     @Test
@@ -174,7 +174,7 @@ class OrdenCompraServiceImplTest {
         when(proveedorRepository.findById(1)).thenReturn(Optional.of(proveedor(1, true)));
         when(usuarioRepository.findById(99)).thenReturn(Optional.empty());
         assertThrows(ReglaNegocioException.class, () -> service.crear(
-                request(1, 99, List.of(detalleDto(10, 1, 10.0)))));
+                request(1, 99, List.of(detalleDto(10, 1, 10.0)), 99));
     }
 
     @Test
@@ -184,7 +184,7 @@ class OrdenCompraServiceImplTest {
         when(usuarioRepository.findById(2)).thenReturn(Optional.of(usuario(2)));
         when(equipoRepository.findById(999)).thenReturn(Optional.empty());
         assertThrows(ReglaNegocioException.class, () -> service.crear(
-                request(1, 2, List.of(detalleDto(999, 1, 10.0)))));
+                request(1, 2, List.of(detalleDto(999, 1, 10.0))), 2));
     }
 
     // ---------- actualizar ----------
@@ -200,7 +200,7 @@ class OrdenCompraServiceImplTest {
         orden.setDetalles(new ArrayList<>());
         when(ordenCompraRepository.findById(5)).thenReturn(Optional.of(orden));
 
-        OrdenCompra dto = service.actualizar(5, request(1, 2, List.of(detalleDto(10, 3, 20.0))));
+        OrdenCompra dto = service.actualizar(5, request(1, 2, List.of(detalleDto(10, 3, 20.0))), 2);
 
         assertEquals(60.00, dto.getTotal());
         assertEquals(1, dto.getDetalles().size());
@@ -216,7 +216,7 @@ class OrdenCompraServiceImplTest {
         when(ordenCompraRepository.findById(5)).thenReturn(Optional.of(orden));
 
         assertThrows(ReglaNegocioException.class,
-                () -> service.actualizar(5, request(1, 2, List.of(detalleDto(10, 1, 20.0)))));
+                () -> service.actualizar(5, request(1, 2, List.of(detalleDto(10, 1, 20.0))), 2));
     }
 
     @Test
@@ -224,7 +224,7 @@ class OrdenCompraServiceImplTest {
     void actualizarNoEncontrada() {
         when(ordenCompraRepository.findById(99)).thenReturn(Optional.empty());
         assertThrows(RecursoNoEncontradoException.class,
-                () -> service.actualizar(99, request(1, 2, List.of(detalleDto(10, 1, 20.0)))));
+                () -> service.actualizar(99, request(1, 2, List.of(detalleDto(10, 1, 20.0))), 2));
     }
 
     // ---------- obtener / listar ----------
@@ -277,7 +277,7 @@ class OrdenCompraServiceImplTest {
         OrdenCompraEstadoRequest estadoRequest = new OrdenCompraEstadoRequest();
         estadoRequest.setEstado(com.alquilereventos.common.dto.EstadoOrdenCompra.CONFIRMADA);
 
-        OrdenCompra dto = service.cambiarEstado(5, estadoRequest);
+        OrdenCompra dto = service.cambiarEstado(5, estadoRequest, 2);
 
         assertEquals("CONFIRMADA", dto.getEstado().name());
         verify(historialRepository, times(1)).save(any());
@@ -309,7 +309,7 @@ class OrdenCompraServiceImplTest {
         OrdenCompraEstadoRequest estadoRequest = new OrdenCompraEstadoRequest();
         estadoRequest.setEstado(com.alquilereventos.common.dto.EstadoOrdenCompra.RECIBIDA);
 
-        OrdenCompra dto = service.cambiarEstado(5, estadoRequest);
+        OrdenCompra dto = service.cambiarEstado(5, estadoRequest, 2);
 
         assertEquals("RECIBIDA", dto.getEstado().name());
         assertEquals(8, equipo10.getStock());
@@ -329,7 +329,7 @@ class OrdenCompraServiceImplTest {
         OrdenCompraEstadoRequest estadoRequest = new OrdenCompraEstadoRequest();
         estadoRequest.setEstado(com.alquilereventos.common.dto.EstadoOrdenCompra.RECIBIDA);
 
-        assertThrows(ReglaNegocioException.class, () -> service.cambiarEstado(5, estadoRequest));
+        assertThrows(ReglaNegocioException.class, () -> service.cambiarEstado(5, estadoRequest, 2));
         verify(equipoRepository, never()).save(any());
     }
 
@@ -345,14 +345,14 @@ class OrdenCompraServiceImplTest {
         OrdenCompraEstadoRequest estadoRequest = new OrdenCompraEstadoRequest();
         estadoRequest.setEstado(com.alquilereventos.common.dto.EstadoOrdenCompra.ANULADA);
 
-        assertThrows(ReglaNegocioException.class, () -> service.cambiarEstado(5, estadoRequest));
+        assertThrows(ReglaNegocioException.class, () -> service.cambiarEstado(5, estadoRequest, 2));
     }
 
     @Test
     @DisplayName("cambiarEstado: sin estado destino lanza ReglaNegocioException")
     void estadoNull() {
         assertThrows(ReglaNegocioException.class,
-                () -> service.cambiarEstado(5, new OrdenCompraEstadoRequest()));
+                () -> service.cambiarEstado(5, new OrdenCompraEstadoRequest(), 2));
     }
 
     // ---------- eliminar (ANULADA) ----------
@@ -368,7 +368,7 @@ class OrdenCompraServiceImplTest {
         orden.setDetalles(new ArrayList<>());
         when(ordenCompraRepository.findById(5)).thenReturn(Optional.of(orden));
 
-        OrdenCompra dto = service.eliminar(5);
+        OrdenCompra dto = service.eliminar(5, 2);
 
         assertEquals("ANULADA", dto.getEstado().name());
         verify(ordenCompraRepository, never()).delete(any());
@@ -384,6 +384,6 @@ class OrdenCompraServiceImplTest {
         orden.setEstado(EstadoOrdenCompra.CONFIRMADA);
         when(ordenCompraRepository.findById(5)).thenReturn(Optional.of(orden));
 
-        assertThrows(ReglaNegocioException.class, () -> service.eliminar(5));
+        assertThrows(ReglaNegocioException.class, () -> service.eliminar(5, 2));
     }
 }

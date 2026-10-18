@@ -54,7 +54,6 @@ class OrdenCompraControllerTest {
     private final String cuerpoCrear = """
             {
               "proveedorId": 1,
-              "usuarioId": 2,
               "detalles": [
                 {"equipoId": 10, "cantidad": 2, "costoUnitario": 100.0}
               ]
@@ -64,7 +63,7 @@ class OrdenCompraControllerTest {
     @Test
     @DisplayName("POST /ordenes-compra devuelve 201 con la orden creada")
     void crearDevuelve201() throws Exception {
-        when(ordenCompraService.crear(any())).thenReturn(dto(1, "PENDIENTE"));
+        when(ordenCompraService.crear(any(), any())).thenReturn(dto(1, "PENDIENTE"));
 
         mockMvc.perform(post("/ordenes-compra")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -77,12 +76,12 @@ class OrdenCompraControllerTest {
     @Test
     @DisplayName("POST /ordenes-compra sin detalles devuelve 400 con ApiError")
     void crearSinDetalles400() throws Exception {
-        when(ordenCompraService.crear(any()))
+        when(ordenCompraService.crear(any(), any()))
                 .thenThrow(new ReglaNegocioException("La orden debe tener al menos un detalle"));
 
         mockMvc.perform(post("/ordenes-compra")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"proveedorId\":1,\"usuarioId\":2,\"detalles\":[]}"))
+                        .content("{\"proveedorId\":1,\"detalles\":[]}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.codigo").value(400))
                 .andExpect(jsonPath("$.mensaje").value("La orden debe tener al menos un detalle"));
@@ -91,7 +90,7 @@ class OrdenCompraControllerTest {
     @Test
     @DisplayName("PUT /ordenes-compra/{id}/estado cambia el estado (200)")
     void cambiarEstado() throws Exception {
-        when(ordenCompraService.cambiarEstado(eq(1), any())).thenReturn(dto(1, "CONFIRMADA"));
+        when(ordenCompraService.cambiarEstado(eq(1), any(), any())).thenReturn(dto(1, "CONFIRMADA"));
 
         mockMvc.perform(put("/ordenes-compra/1/estado")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -103,7 +102,7 @@ class OrdenCompraControllerTest {
     @Test
     @DisplayName("PUT /ordenes-compra/{id}/estado con transicion invalida devuelve 400")
     void cambiarEstadoInvalido() throws Exception {
-        when(ordenCompraService.cambiarEstado(eq(1), any()))
+        when(ordenCompraService.cambiarEstado(eq(1), any(), any()))
                 .thenThrow(new ReglaNegocioException("Transicion de estado no permitida: PENDIENTE -> RECIBIDA"));
 
         mockMvc.perform(put("/ordenes-compra/1/estado")
@@ -151,8 +150,8 @@ class OrdenCompraControllerTest {
     @Test
     @DisplayName("DELETE /ordenes-compra/{id} anula (200) y orden inexistente da 404")
     void eliminar() throws Exception {
-        when(ordenCompraService.eliminar(1)).thenReturn(dto(1, "ANULADA"));
-        when(ordenCompraService.eliminar(99))
+        when(ordenCompraService.eliminar(eq(1), any())).thenReturn(dto(1, "ANULADA"));
+        when(ordenCompraService.eliminar(eq(99), any()))
                 .thenThrow(new RecursoNoEncontradoException("Orden de compra no encontrada: 99"));
 
         mockMvc.perform(delete("/ordenes-compra/1"))
@@ -166,7 +165,7 @@ class OrdenCompraControllerTest {
     @Test
     @DisplayName("PUT /ordenes-compra/{id} actualiza una orden PENDIENTE (200)")
     void actualizarPendiente() throws Exception {
-        when(ordenCompraService.actualizar(eq(1), any())).thenReturn(dto(1, "PENDIENTE"));
+        when(ordenCompraService.actualizar(eq(1), any(), any())).thenReturn(dto(1, "PENDIENTE"));
 
         mockMvc.perform(put("/ordenes-compra/1")
                         .contentType(MediaType.APPLICATION_JSON)

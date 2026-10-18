@@ -122,11 +122,11 @@ Crear proveedor:
 
 Crear orden de compra (se confirma y luego se recibe → suma stock):
 ```json
-{ "proveedorId": 1, "usuarioId": 1, "fechaCompra": "2026-10-20", "detalles": [ { "equipoId": 1, "cantidad": 5, "costoUnitario": 150000 } ] }
+{ "proveedorId": 1, "fechaCompra": "2026-10-20", "detalles": [ { "equipoId": 1, "cantidad": 5, "costoUnitario": 150000 } ] }
 ```
 Cambiar estado:
 ```json
-{ "usuarioId": 1, "estado": "CONFIRMADA" }
+{ "estado": "CONFIRMADA" }
 ```
 
 ---

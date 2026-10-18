@@ -24,6 +24,16 @@ spring:
     change-log: classpath:db/changelog/db.changelog-master.yaml
     # Liquibase deshabilitado aca: las tablas ya se crean en ms-alquiler.
     enabled: false
+  cache:
+    type: ${CACHE_TYPE:redis}
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      username: ${REDIS_USERNAME:}
+      password: ${REDIS_PASSWORD:}
+      ssl:
+        enabled: ${REDIS_SSL:false}
 
 server:
   port: ${SERVER_PORT:8082}
@@ -56,12 +66,32 @@ app:
     server-url: ${OPENAPI_SERVER_URL:http://localhost:8082/api}
     title: ${OPENAPI_TITLE:MS Compras - Proveedores y Ordenes de Compra}
     description: ${OPENAPI_DESCRIPTION:Microservicio de compras (entrega 2) del sistema de alquiler de equipos para eventos}
+  cache:
+    enabled: ${CACHE_ENABLED:true}
+    key-prefix: ${CACHE_KEY_PREFIX:ae}
+    environment: ${CACHE_ENVIRONMENT:local}
+    key-version: ${CACHE_KEY_VERSION:v1}
+    domains:
+      proveedores:
+        name: ${CACHE_PROVEEDORES_NAME:compras:proveedores}
+        key-type: ${CACHE_PROVEEDORES_KEY_TYPE:proveedor}
+        ttl-seconds: ${CACHE_PROVEEDORES_TTL_SECONDS:1800}
+      ordenes-compra:
+        name: ${CACHE_ORDENES_COMPRA_NAME:compras:ordenes-compra}
+        key-type: ${CACHE_ORDENES_COMPRA_KEY_TYPE:orden-compra}
+        ttl-seconds: ${CACHE_ORDENES_COMPRA_TTL_SECONDS:120}
+  security:
+    jwt:
+      secret: ${SECURITY_JWT_SECRET:}
+      issuer: ${SECURITY_JWT_ISSUER:alquiler-eventos-seguridad}
+      algorithm: ${SECURITY_JWT_ALGORITHM:HS256}
 
 logging:
   config: ${LOGGING_CONFIG:classpath:logback-spring.xml}
   level:
     com.alquilereventos.compras: ${LOG_LEVEL_APP:INFO}
     org.hibernate.SQL: ${LOG_LEVEL_SQL:DEBUG}
+    com.alquilereventos.compras.config.cache: ${LOG_LEVEL_CACHE:INFO}
 
 springdoc:
   swagger-ui:

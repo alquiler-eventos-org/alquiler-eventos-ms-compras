@@ -10,15 +10,15 @@ import com.alquilereventos.common.dto.PageOrdenCompra;
  */
 public interface OrdenCompraService {
 
-    OrdenCompra crear(OrdenCompraCrearRequest request);
+    OrdenCompra crear(OrdenCompraCrearRequest request, Integer usuarioActorId);
 
-    OrdenCompra actualizar(Integer id, OrdenCompraCrearRequest request);
+    OrdenCompra actualizar(Integer id, OrdenCompraCrearRequest request, Integer usuarioActorId);
 
     OrdenCompra obtenerPorId(Integer id);
 
     PageOrdenCompra listar(Integer page, Integer size);
 
-    OrdenCompra cambiarEstado(Integer id, OrdenCompraEstadoRequest request);
+    OrdenCompra cambiarEstado(Integer id, OrdenCompraEstadoRequest request, Integer usuarioActorId);
 
-    OrdenCompra eliminar(Integer id);
+    OrdenCompra eliminar(Integer id, Integer usuarioActorId);
 }

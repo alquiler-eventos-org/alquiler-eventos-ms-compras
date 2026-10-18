@@ -16,9 +16,17 @@ import com.alquilereventos.common.repository.ProveedorRepository;
 import com.alquilereventos.common.repository.UsuarioRepository;
 import com.alquilereventos.compras.exception.RecursoNoEncontradoException;
 import com.alquilereventos.compras.exception.ReglaNegocioException;
+import com.alquilereventos.compras.config.cache.CacheKeyFactory;
 import com.alquilereventos.compras.mapper.OrdenCompraMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.CachePut;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -50,24 +58,46 @@ public class OrdenCompraServiceImpl implements OrdenCompraService {
     private final EquipoRepository equipoRepository;
     private final OrdenCompraHistorialRepository historialRepository;
     private final OrdenCompraMapper ordenCompraMapper;
+    private final CacheManager cacheManager;
+    private final CacheKeyFactory cacheKeys;
+    private final String ordenesCompraCacheName;
 
+    @Autowired
     public OrdenCompraServiceImpl(OrdenCompraRepository ordenCompraRepository,
                                   ProveedorRepository proveedorRepository,
                                   UsuarioRepository usuarioRepository,
                                   EquipoRepository equipoRepository,
                                   OrdenCompraHistorialRepository historialRepository,
-                                  OrdenCompraMapper ordenCompraMapper) {
+                                  OrdenCompraMapper ordenCompraMapper,
+                                  CacheManager cacheManager,
+                                  CacheKeyFactory cacheKeys,
+                                  @Value("${app.cache.domains.ordenes-compra.name}") String ordenesCompraCacheName) {
         this.ordenCompraRepository = ordenCompraRepository;
         this.proveedorRepository = proveedorRepository;
         this.usuarioRepository = usuarioRepository;
         this.equipoRepository = equipoRepository;
         this.historialRepository = historialRepository;
         this.ordenCompraMapper = ordenCompraMapper;
+        this.cacheManager = cacheManager;
+        this.cacheKeys = cacheKeys;
+        this.ordenesCompraCacheName = ordenesCompraCacheName;
+    }
+
+    /** Constructor conservado para pruebas unitarias sin infraestructura Redis. */
+    public OrdenCompraServiceImpl(OrdenCompraRepository ordenCompraRepository,
+                                  ProveedorRepository proveedorRepository,
+                                  UsuarioRepository usuarioRepository,
+                                  EquipoRepository equipoRepository,
+                                  OrdenCompraHistorialRepository historialRepository,
+                                  OrdenCompraMapper ordenCompraMapper) {
+        this(ordenCompraRepository, proveedorRepository, usuarioRepository, equipoRepository,
+                historialRepository, ordenCompraMapper, null, null, null);
     }
 
     @Override
     @Transactional
-    public OrdenCompra crear(OrdenCompraCrearRequest request) {
+    @CachePut(cacheNames = "${app.cache.domains.ordenes-compra.name}", key = "@cacheKeys.ordenCompra(#result.id)")
+    public OrdenCompra crear(OrdenCompraCrearRequest request, Integer usuarioActorId) {
         validarRequest(request);
         log.info("Creando orden de compra para proveedor {}", request.getProveedorId());
         validarDetalles(request.getDetalles());
@@ -78,9 +108,7 @@ public class OrdenCompraServiceImpl implements OrdenCompraService {
                         .orElseThrow(() -> new ReglaNegocioException(
                                 "Proveedor no encontrado o inactivo: " + request.getProveedorId()));
 
-        Usuario usuario = usuarioRepository.findById(request.getUsuarioId())
-                .orElseThrow(() -> new ReglaNegocioException(
-                        "Usuario no encontrado: " + request.getUsuarioId()));
+        Usuario usuario = obtenerUsuarioActivo(usuarioActorId);
 
         com.alquilereventos.common.entity.OrdenCompra orden =
                 new com.alquilereventos.common.entity.OrdenCompra();
@@ -93,20 +121,22 @@ public class OrdenCompraServiceImpl implements OrdenCompraService {
 
         orden = cargarDetallesYTotal(orden, request.getDetalles());
         orden = ordenCompraRepository.save(orden);
-        registrarHistorial(orden, EstadoOrdenCompra.PENDIENTE, EstadoOrdenCompra.PENDIENTE);
+        registrarHistorial(orden, usuario, EstadoOrdenCompra.PENDIENTE, EstadoOrdenCompra.PENDIENTE);
         log.debug("Orden de compra {} creada con total {}", orden.getId(), orden.getTotal());
         return ordenCompraMapper.toDto(orden);
     }
 
     @Override
     @Transactional
-    public OrdenCompra actualizar(Integer id, OrdenCompraCrearRequest request) {
+    @CachePut(cacheNames = "${app.cache.domains.ordenes-compra.name}", key = "@cacheKeys.ordenCompra(#id)")
+    public OrdenCompra actualizar(Integer id, OrdenCompraCrearRequest request, Integer usuarioActorId) {
         validarRequest(request);
         log.info("Actualizando orden de compra {}", id);
         com.alquilereventos.common.entity.OrdenCompra orden = obtenerEntidad(id);
         if (orden.getEstado() != EstadoOrdenCompra.PENDIENTE) {
             throw new ReglaNegocioException("Solo se puede modificar una orden en estado PENDIENTE");
         }
+        obtenerUsuarioActivo(usuarioActorId);
         validarDetalles(request.getDetalles());
 
         com.alquilereventos.common.entity.Proveedor proveedor =
@@ -127,6 +157,7 @@ public class OrdenCompraServiceImpl implements OrdenCompraService {
 
     @Override
     @Transactional(readOnly = true)
+    @Cacheable(cacheNames = "${app.cache.domains.ordenes-compra.name}", key = "@cacheKeys.ordenCompra(#id)")
     public OrdenCompra obtenerPorId(Integer id) {
         log.debug("Buscando orden de compra {}", id);
         return ordenCompraMapper.toDto(obtenerEntidad(id));
@@ -140,7 +171,9 @@ public class OrdenCompraServiceImpl implements OrdenCompraService {
         Page<com.alquilereventos.common.entity.OrdenCompra> pagina =
                 ordenCompraRepository.findAll(pageable);
         PageOrdenCompra dto = new PageOrdenCompra();
-        dto.setContenido(pagina.map(ordenCompraMapper::toDto).getContent());
+        var contenido = pagina.map(ordenCompraMapper::toDto).getContent();
+        calentarOrdenes(contenido);
+        dto.setContenido(contenido);
         dto.setTotalElementos(pagina.getTotalElements());
         dto.setNumeroPagina(pagina.getNumber());
         dto.setTamanoPagina(pagina.getSize());
@@ -149,11 +182,13 @@ public class OrdenCompraServiceImpl implements OrdenCompraService {
 
     @Override
     @Transactional
-    public OrdenCompra cambiarEstado(Integer id, OrdenCompraEstadoRequest request) {
+    @CachePut(cacheNames = "${app.cache.domains.ordenes-compra.name}", key = "@cacheKeys.ordenCompra(#id)")
+    public OrdenCompra cambiarEstado(Integer id, OrdenCompraEstadoRequest request, Integer usuarioActorId) {
         if (request == null || request.getEstado() == null) {
             throw new ReglaNegocioException("El estado destino es obligatorio");
         }
         log.info("Cambiando estado de orden {} a {}", id, request.getEstado());
+        Usuario usuarioActor = obtenerUsuarioActivo(usuarioActorId);
         com.alquilereventos.common.entity.OrdenCompra orden = obtenerEntidad(id);
         EstadoOrdenCompra actual = orden.getEstado();
         EstadoOrdenCompra nuevo = EstadoOrdenCompra.valueOf(request.getEstado().name());
@@ -172,14 +207,16 @@ public class OrdenCompraServiceImpl implements OrdenCompraService {
 
         orden.setEstado(nuevo);
         orden = ordenCompraRepository.save(orden);
-        registrarHistorial(orden, actual, nuevo);
+        registrarHistorial(orden, usuarioActor, actual, nuevo);
         return ordenCompraMapper.toDto(orden);
     }
 
     @Override
     @Transactional
-    public OrdenCompra eliminar(Integer id) {
+    @CacheEvict(cacheNames = "${app.cache.domains.ordenes-compra.name}", key = "@cacheKeys.ordenCompra(#id)")
+    public OrdenCompra eliminar(Integer id, Integer usuarioActorId) {
         log.info("Borrado logico (ANULADA) de orden {}", id);
+        Usuario usuarioActor = obtenerUsuarioActivo(usuarioActorId);
         com.alquilereventos.common.entity.OrdenCompra orden = obtenerEntidad(id);
         if (orden.getEstado() != EstadoOrdenCompra.PENDIENTE) {
             throw new ReglaNegocioException("Solo se puede anular una orden en estado PENDIENTE");
@@ -187,13 +224,13 @@ public class OrdenCompraServiceImpl implements OrdenCompraService {
         EstadoOrdenCompra actual = orden.getEstado();
         orden.setEstado(EstadoOrdenCompra.ANULADA);
         orden = ordenCompraRepository.save(orden);
-        registrarHistorial(orden, actual, EstadoOrdenCompra.ANULADA);
+        registrarHistorial(orden, usuarioActor, actual, EstadoOrdenCompra.ANULADA);
         return ordenCompraMapper.toDto(orden);
     }
 
     private void validarRequest(OrdenCompraCrearRequest request) {
-        if (request == null || request.getProveedorId() == null || request.getUsuarioId() == null) {
-            throw new ReglaNegocioException("Proveedor, usuario y detalles son obligatorios");
+        if (request == null || request.getProveedorId() == null) {
+            throw new ReglaNegocioException("Proveedor y detalles son obligatorios");
         }
     }
 
@@ -250,11 +287,12 @@ public class OrdenCompraServiceImpl implements OrdenCompraService {
     }
 
     private void registrarHistorial(com.alquilereventos.common.entity.OrdenCompra orden,
+                                    Usuario usuarioActor,
                                     EstadoOrdenCompra estadoAnterior,
                                     EstadoOrdenCompra estadoNuevo) {
         OrdenCompraHistorial registro = new OrdenCompraHistorial();
         registro.setOrdenCompra(orden);
-        registro.setUsuario(orden.getUsuario());
+        registro.setUsuario(usuarioActor);
         registro.setEstadoAnterior(estadoAnterior.name());
         registro.setEstadoNuevo(estadoNuevo.name());
         historialRepository.save(registro);
@@ -264,5 +302,25 @@ public class OrdenCompraServiceImpl implements OrdenCompraService {
     private com.alquilereventos.common.entity.OrdenCompra obtenerEntidad(Integer id) {
         return ordenCompraRepository.findById(id)
                 .orElseThrow(() -> new RecursoNoEncontradoException("Orden de compra no encontrada: " + id));
+    }
+
+    private Usuario obtenerUsuarioActivo(Integer usuarioId) {
+        if (usuarioId == null) {
+            throw new ReglaNegocioException("El usuario autenticado es obligatorio");
+        }
+        return usuarioRepository.findById(usuarioId)
+                .filter(usuario -> Boolean.TRUE.equals(usuario.getActivo()))
+                .orElseThrow(() -> new ReglaNegocioException("Usuario no encontrado o inactivo: " + usuarioId));
+    }
+
+    /** No se guarda la pagina; se cargan individualmente las ordenes obtenidas. */
+    private void calentarOrdenes(List<OrdenCompra> ordenes) {
+        if (cacheManager == null || cacheKeys == null) {
+            return;
+        }
+        Cache cache = cacheManager.getCache(ordenesCompraCacheName);
+        if (cache != null) {
+            ordenes.forEach(orden -> cache.put(cacheKeys.ordenCompra(orden.getId()), orden));
+        }
     }
 }

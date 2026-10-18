@@ -10,6 +10,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -25,6 +28,7 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 @RequestMapping("/ordenes-compra")
+@PreAuthorize("hasAnyRole('ADMIN', 'ENCARGADO_COMPRAS')")
 public class OrdenCompraController {
 
     private static final Logger log = LoggerFactory.getLogger(OrdenCompraController.class);
@@ -36,16 +40,18 @@ public class OrdenCompraController {
     }
 
     @PostMapping
-    public ResponseEntity<OrdenCompra> crear(@Valid @RequestBody OrdenCompraCrearRequest request) {
+    public ResponseEntity<OrdenCompra> crear(@Valid @RequestBody OrdenCompraCrearRequest request,
+                                             @AuthenticationPrincipal Jwt jwt) {
         log.info("POST /ordenes-compra");
-        return ResponseEntity.status(HttpStatus.CREATED).body(ordenCompraService.crear(request));
+        return ResponseEntity.status(HttpStatus.CREATED).body(ordenCompraService.crear(request, usuarioId(jwt)));
     }
 
     @PutMapping("/{id}")
     public OrdenCompra actualizar(@PathVariable Integer id,
-                                  @Valid @RequestBody OrdenCompraCrearRequest request) {
+                                  @Valid @RequestBody OrdenCompraCrearRequest request,
+                                  @AuthenticationPrincipal Jwt jwt) {
         log.info("PUT /ordenes-compra/{}", id);
-        return ordenCompraService.actualizar(id, request);
+        return ordenCompraService.actualizar(id, request, usuarioId(jwt));
     }
 
     @GetMapping("/{id}")
@@ -65,14 +71,26 @@ public class OrdenCompraController {
 
     @PutMapping("/{id}/estado")
     public OrdenCompra cambiarEstado(@PathVariable Integer id,
-                                     @Valid @RequestBody OrdenCompraEstadoRequest request) {
+                                     @Valid @RequestBody OrdenCompraEstadoRequest request,
+                                     @AuthenticationPrincipal Jwt jwt) {
         log.info("PUT /ordenes-compra/{}/estado", id);
-        return ordenCompraService.cambiarEstado(id, request);
+        return ordenCompraService.cambiarEstado(id, request, usuarioId(jwt));
     }
 
     @DeleteMapping("/{id}")
-    public OrdenCompra eliminar(@PathVariable Integer id) {
+    public OrdenCompra eliminar(@PathVariable Integer id, @AuthenticationPrincipal Jwt jwt) {
         log.info("DELETE /ordenes-compra/{}", id);
-        return ordenCompraService.eliminar(id);
+        return ordenCompraService.eliminar(id, usuarioId(jwt));
+    }
+
+    private Integer usuarioId(Jwt jwt) {
+        if (jwt == null || jwt.getClaimAsString("uid") == null) {
+            return null;
+        }
+        try {
+            return Integer.valueOf(jwt.getClaimAsString("uid"));
+        } catch (NumberFormatException ex) {
+            return null;
+        }
     }
 }
