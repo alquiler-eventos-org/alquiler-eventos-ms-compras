@@ -12,7 +12,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
+import org.springframework.security.web.method.annotation.AuthenticationPrincipalArgumentResolver;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.util.List;
@@ -40,9 +45,29 @@ class OrdenCompraControllerTest {
     @BeforeEach
     void setUp() {
         ordenCompraService = mock(OrdenCompraService.class);
+        // En MockMvc standalone no hay filtro de security: se registra a mano
+        // el resolver de @AuthenticationPrincipal y se setea el SecurityContext
+        // por request con un JWT de prueba (ver conJwt()).
         mockMvc = MockMvcBuilders.standaloneSetup(new OrdenCompraController(ordenCompraService))
                 .setControllerAdvice(new ApiExceptionHandler())
+                .setCustomArgumentResolvers(new AuthenticationPrincipalArgumentResolver())
                 .build();
+        SecurityContextHolder.clearContext();
+    }
+
+    /** JWT firmado de prueba con uid=2 y el rol de compras. */
+    private RequestPostProcessor conJwt() {
+        Jwt jwt = Jwt.withTokenValue("token-de-prueba")
+                .header("alg", "HS256")
+                .subject("usuario-compras@test")
+                .claim("uid", 2)
+                .claim("roles", java.util.List.of("ENCARGADO_COMPRAS"))
+                .build();
+        JwtAuthenticationToken autenticacion = new JwtAuthenticationToken(jwt);
+        return request -> {
+            SecurityContextHolder.getContext().setAuthentication(autenticacion);
+            return request;
+        };
     }
 
     private OrdenCompra dto(int id, String estado) {
@@ -66,6 +91,7 @@ class OrdenCompraControllerTest {
         when(ordenCompraService.crear(any(), any())).thenReturn(dto(1, "PENDIENTE"));
 
         mockMvc.perform(post("/ordenes-compra")
+                        .with(conJwt())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(cuerpoCrear))
                 .andExpect(status().isCreated())
@@ -80,6 +106,7 @@ class OrdenCompraControllerTest {
                 .thenThrow(new ReglaNegocioException("La orden debe tener al menos un detalle"));
 
         mockMvc.perform(post("/ordenes-compra")
+                        .with(conJwt())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"proveedorId\":1,\"detalles\":[]}"))
                 .andExpect(status().isBadRequest())
@@ -93,6 +120,7 @@ class OrdenCompraControllerTest {
         when(ordenCompraService.cambiarEstado(eq(1), any(), any())).thenReturn(dto(1, "CONFIRMADA"));
 
         mockMvc.perform(put("/ordenes-compra/1/estado")
+                        .with(conJwt())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"estado\":\"CONFIRMADA\"}"))
                 .andExpect(status().isOk())
@@ -106,6 +134,7 @@ class OrdenCompraControllerTest {
                 .thenThrow(new ReglaNegocioException("Transicion de estado no permitida: PENDIENTE -> RECIBIDA"));
 
         mockMvc.perform(put("/ordenes-compra/1/estado")
+                        .with(conJwt())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"estado\":\"RECIBIDA\"}"))
                 .andExpect(status().isBadRequest())
@@ -154,11 +183,11 @@ class OrdenCompraControllerTest {
         when(ordenCompraService.eliminar(eq(99), any()))
                 .thenThrow(new RecursoNoEncontradoException("Orden de compra no encontrada: 99"));
 
-        mockMvc.perform(delete("/ordenes-compra/1"))
+        mockMvc.perform(delete("/ordenes-compra/1").with(conJwt()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.estado").value("ANULADA"));
 
-        mockMvc.perform(delete("/ordenes-compra/99"))
+        mockMvc.perform(delete("/ordenes-compra/99").with(conJwt()))
                 .andExpect(status().isNotFound());
     }
 
@@ -168,6 +197,7 @@ class OrdenCompraControllerTest {
         when(ordenCompraService.actualizar(eq(1), any(), any())).thenReturn(dto(1, "PENDIENTE"));
 
         mockMvc.perform(put("/ordenes-compra/1")
+                        .with(conJwt())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(cuerpoCrear))
                 .andExpect(status().isOk())

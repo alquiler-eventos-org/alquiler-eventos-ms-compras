@@ -157,7 +157,7 @@ class OrdenCompraServiceImplTest {
     @DisplayName("crear: sin proveedorId lanza ReglaNegocioException")
     void crearSinProveedor() {
         assertThrows(ReglaNegocioException.class,
-                () -> service.crear(request(null, 2, List.of(detalleDto(10, 1, 10.0)), 2));
+                () -> service.crear(request(null, 2, List.of(detalleDto(10, 1, 10.0))), 2));
     }
 
     @Test
@@ -165,7 +165,7 @@ class OrdenCompraServiceImplTest {
     void crearProveedorInactivo() {
         when(proveedorRepository.findById(1)).thenReturn(Optional.of(proveedor(1, false)));
         assertThrows(ReglaNegocioException.class, () -> service.crear(
-                request(1, 2, List.of(detalleDto(10, 1, 10.0)), 2));
+                request(1, 2, List.of(detalleDto(10, 1, 10.0))), 2));
     }
 
     @Test
@@ -174,7 +174,7 @@ class OrdenCompraServiceImplTest {
         when(proveedorRepository.findById(1)).thenReturn(Optional.of(proveedor(1, true)));
         when(usuarioRepository.findById(99)).thenReturn(Optional.empty());
         assertThrows(ReglaNegocioException.class, () -> service.crear(
-                request(1, 99, List.of(detalleDto(10, 1, 10.0)), 99));
+                request(1, 99, List.of(detalleDto(10, 1, 10.0))), 99));
     }
 
     @Test
