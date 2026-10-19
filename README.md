@@ -204,7 +204,7 @@ Verificar: `http://localhost:8761` → `MS-COMPRAS` UP. Probar por gateway: `htt
 mvn test        # corre los unitarios de controller, service y mappers
 ```
 
-Cobertura actual: `OrdenCompraControllerTest`, `ProveedorControllerTest`, `OrdenCompraServiceImplTest`, `ProveedorServiceImplTest`, `OrdenCompraMapperTest`, `ProveedorMapperTest`.
+Cobertura actual: `OrdenCompraControllerTest`, `ProveedorControllerTest`, `OrdenCompraServiceImplTest`, `ProveedorServiceImplTest`, `OrdenCompraMapperTest`, `ProveedorMapperTest`, `ComprasSecurityRulesTest` (401/403/200 con `@WebMvcTest`), `CacheKeyFactoryTest` y `LoggingCacheTest` (**64 tests**).
 
 ## 10. Swagger
 
@@ -224,4 +224,51 @@ Unificado desde el gateway: `http://localhost:8080/swagger-ui.html` → en el de
 | Configurabilidad | `application.yml` 100% parametrizado por variables de entorno. |
 
 ---
-*README regenerado el 2026-10-11 para reflejar el código real del repo.*
+
+## 12. Entrega #3 — Seguridad JWT y caché Redis
+
+### Seguridad (segunda capa, además del Gateway)
+
+- `ComprasSecurityConfig` monta un **Resource Server** que valida el mismo JWT
+  (firma + `iss` + `exp`) aunque se llame directo al puerto `8082`.
+- Por URL: `/proveedores/**` y `/ordenes-compra/**` → `ADMIN` o
+  `ENCARGADO_COMPRAS`. Público: Swagger, `/v3/api-docs/**` y `/actuator/health`.
+- Por método: `@EnableMethodSecurity` + `@PreAuthorize`.
+- **401** (token ausente/inválido) y **403** (rol insuficiente) se devuelven como
+  `ApiError` sin trazas (`SecurityErrorHandler`).
+- El claim `roles` se convierte a `ROLE_*`; el **actor** de una orden se toma del
+  `uid` del JWT (`usuarioId(Jwt)`), nunca del body.
+
+### Caché Redis (cache-aside sobre DTOs)
+
+| Sección | Objeto | TTL | Clave |
+|---|---|---|---|
+| `compras:proveedores` | Proveedor por ID | 1800 s | `ae:local:compras:proveedor:v1:{id}` |
+| `compras:ordenes-compra` | OrdenCompra por ID | 120 s | `ae:local:compras:orden-compra:v1:{id}` |
+
+- `@Cacheable` (GET), `@CachePut` (crear/actualizar/cambio de estado) y
+  `@CacheEvict` (baja lógica); las páginas **no** se cachean como colección, solo
+  se calientan sus ítems individuales (`CacheManager`).
+- `LoggingCache` registra **toda** operación:
+  `CACHE GET cache=... key=... result=HIT|MISS`, `CACHE SET ...`,
+  `CACHE DELETE ...`, `CACHE ERROR operation=...`.
+- Si Redis cae, el servicio sigue contra PostgreSQL (`CACHE ERROR`, nunca 500).
+  Con `CACHE_ENABLED=false` corre sin caché (`NoOpCacheManager`).
+
+### Variables nuevas
+
+| Variable | Default | Uso |
+|---|---|---|
+| `SECURITY_JWT_SECRET` | — | Base64 32+ bytes (obligatoria) |
+| `SECURITY_JWT_ISSUER` | `alquiler-eventos-seguridad` | Emisor esperado |
+| `SECURITY_JWT_ALGORITHM` | `HS256` | `HS256`/`HS384`/`HS512` |
+| `REDIS_HOST` / `REDIS_PORT` | `localhost` / `6379` | Redis compartido |
+| `CACHE_ENABLED` | `true` | Interruptor de caché |
+| `CACHE_KEY_PREFIX`, `CACHE_ENVIRONMENT`, `CACHE_KEY_VERSION` | `ae`, `local`, `v1` | Formato de claves |
+| `CACHE_PROVEEDORES_TTL_SECONDS` | `1800` | TTL de proveedor |
+| `CACHE_ORDENES_COMPRA_TTL_SECONDS` | `120` | TTL de orden de compra |
+
+Guía de prueba completa: `../GUIA-PRUEBAS-ENTREGA-3.md`.
+
+---
+*README regenerado el 2026-10-11 para reflejar el código real del repo. Sección 12 agregada para la Entrega #3.*

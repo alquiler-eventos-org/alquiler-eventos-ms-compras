@@ -5,12 +5,14 @@ import com.alquilereventos.common.dto.OrdenCompraCrearRequest;
 import com.alquilereventos.common.dto.OrdenCompraEstadoRequest;
 import com.alquilereventos.common.dto.PageOrdenCompra;
 import com.alquilereventos.compras.service.OrdenCompraService;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -29,6 +31,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/ordenes-compra")
 @PreAuthorize("hasAnyRole('ADMIN', 'ENCARGADO_COMPRAS')")
+@SecurityRequirement(name = "bearerAuth")
 public class OrdenCompraController {
 
     private static final Logger log = LoggerFactory.getLogger(OrdenCompraController.class);
@@ -85,12 +88,12 @@ public class OrdenCompraController {
 
     private Integer usuarioId(Jwt jwt) {
         if (jwt == null || jwt.getClaimAsString("uid") == null) {
-            return null;
+            throw new BadCredentialsException("El token no contiene un uid valido");
         }
         try {
             return Integer.valueOf(jwt.getClaimAsString("uid"));
         } catch (NumberFormatException ex) {
-            return null;
+            throw new BadCredentialsException("El token no contiene un uid valido");
         }
     }
 }

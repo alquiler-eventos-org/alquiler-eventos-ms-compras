@@ -3,6 +3,7 @@ package com.alquilereventos.compras.config.cache;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.cache.Cache;
+import org.springframework.cache.Cache.ValueRetrievalException;
 
 import java.util.concurrent.Callable;
 
@@ -48,9 +49,18 @@ final class LoggingCache implements Cache {
 
     @Override
     public <T> T get(Object key, Callable<T> valueLoader) {
-        T result = delegate.get(key, valueLoader);
-        log.info("CACHE GET_OR_LOAD cache={} key={}", getName(), key);
-        return result;
+        try {
+            T result = delegate.get(key, valueLoader);
+            log.info("CACHE GET_OR_LOAD cache={} key={}", getName(), key);
+            return result;
+        } catch (RuntimeException ex) {
+            log.warn("CACHE ERROR operation=GET_OR_LOAD cache={} key={}; se continua sin cache", getName(), key, ex);
+            try {
+                return valueLoader.call();
+            } catch (Exception loaderError) {
+                throw new ValueRetrievalException(key, valueLoader, loaderError);
+            }
+        }
     }
 
     @Override
@@ -65,10 +75,15 @@ final class LoggingCache implements Cache {
 
     @Override
     public ValueWrapper putIfAbsent(Object key, Object value) {
-        ValueWrapper result = delegate.putIfAbsent(key, value);
-        log.info("CACHE SET_IF_ABSENT cache={} key={} result={}", getName(), key,
-                result == null ? "STORED" : "EXISTS");
-        return result;
+        try {
+            ValueWrapper result = delegate.putIfAbsent(key, value);
+            log.info("CACHE SET_IF_ABSENT cache={} key={} result={}", getName(), key,
+                    result == null ? "STORED" : "EXISTS");
+            return result;
+        } catch (RuntimeException ex) {
+            log.warn("CACHE ERROR operation=SET_IF_ABSENT cache={} key={}; se continua sin cache", getName(), key, ex);
+            return null;
+        }
     }
 
     @Override
@@ -83,21 +98,35 @@ final class LoggingCache implements Cache {
 
     @Override
     public boolean evictIfPresent(Object key) {
-        boolean removed = delegate.evictIfPresent(key);
-        log.info("CACHE DELETE_IF_PRESENT cache={} key={} result={}", getName(), key, removed);
-        return removed;
+        try {
+            boolean removed = delegate.evictIfPresent(key);
+            log.info("CACHE DELETE_IF_PRESENT cache={} key={} result={}", getName(), key, removed);
+            return removed;
+        } catch (RuntimeException ex) {
+            log.warn("CACHE ERROR operation=DELETE_IF_PRESENT cache={} key={}; se continua sin cache", getName(), key, ex);
+            return false;
+        }
     }
 
     @Override
     public void clear() {
-        delegate.clear();
-        log.info("CACHE CLEAR cache={}", getName());
+        try {
+            delegate.clear();
+            log.info("CACHE CLEAR cache={}", getName());
+        } catch (RuntimeException ex) {
+            log.warn("CACHE ERROR operation=CLEAR cache={}; se continua sin cache", getName(), ex);
+        }
     }
 
     @Override
     public boolean invalidate() {
-        boolean invalidated = delegate.invalidate();
-        log.info("CACHE INVALIDATE cache={} result={}", getName(), invalidated);
-        return invalidated;
+        try {
+            boolean invalidated = delegate.invalidate();
+            log.info("CACHE INVALIDATE cache={} result={}", getName(), invalidated);
+            return invalidated;
+        } catch (RuntimeException ex) {
+            log.warn("CACHE ERROR operation=INVALIDATE cache={}; se continua sin cache", getName(), ex);
+            return false;
+        }
     }
 }

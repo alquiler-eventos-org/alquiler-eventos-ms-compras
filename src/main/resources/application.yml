@@ -65,7 +65,7 @@ app:
   openapi:
     server-url: ${OPENAPI_SERVER_URL:http://localhost:8082/api}
     title: ${OPENAPI_TITLE:MS Compras - Proveedores y Ordenes de Compra}
-    description: ${OPENAPI_DESCRIPTION:Microservicio de compras (entrega 2) del sistema de alquiler de equipos para eventos}
+    description: ${OPENAPI_DESCRIPTION:Microservicio de compras (entrega 3, con JWT y cache Redis) del sistema de alquiler de equipos para eventos}
   cache:
     enabled: ${CACHE_ENABLED:true}
     key-prefix: ${CACHE_KEY_PREFIX:ae}

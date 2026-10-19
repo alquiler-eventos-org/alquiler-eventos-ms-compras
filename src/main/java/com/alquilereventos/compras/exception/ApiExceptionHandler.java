@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -57,6 +58,15 @@ public class ApiExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(construirError(HttpStatus.BAD_REQUEST,
                         "Cuerpo de solicitud invalido o estado desconocido", request));
+    }
+
+    @ExceptionHandler(AuthenticationException.class)
+    public ResponseEntity<ApiError> manejarNoAutenticado(AuthenticationException ex,
+                                                         HttpServletRequest request) {
+        log.warn("Token sin identidad valida: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(construirError(HttpStatus.UNAUTHORIZED,
+                        "Autenticacion requerida o token invalido", request));
     }
 
     @ExceptionHandler(Exception.class)

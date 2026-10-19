@@ -4,6 +4,7 @@ import com.alquilereventos.common.dto.PageProveedor;
 import com.alquilereventos.common.dto.Proveedor;
 import com.alquilereventos.common.dto.ProveedorCrearRequest;
 import com.alquilereventos.compras.service.ProveedorService;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,6 +27,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/proveedores")
 @PreAuthorize("hasAnyRole('ADMIN', 'ENCARGADO_COMPRAS')")
+@SecurityRequirement(name = "bearerAuth")
 public class ProveedorController {
 
     private static final Logger log = LoggerFactory.getLogger(ProveedorController.class);
