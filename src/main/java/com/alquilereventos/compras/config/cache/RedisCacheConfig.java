@@ -1,15 +1,17 @@
 package com.alquilereventos.compras.config.cache;
 
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.jsontype.impl.LaissezFaireSubTypeValidator;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.data.redis.cache.RedisCacheConfiguration;
 import org.springframework.data.redis.cache.RedisCacheManager;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
@@ -29,6 +31,9 @@ public class RedisCacheConfig {
     @Primary
     CacheManager cacheManager(RedisConnectionFactory connectionFactory, CacheProperties properties) {
         ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+        mapper.disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
         mapper.activateDefaultTyping(LaissezFaireSubTypeValidator.instance,
                 ObjectMapper.DefaultTyping.NON_FINAL, JsonTypeInfo.As.PROPERTY);
         GenericJackson2JsonRedisSerializer serializer = new GenericJackson2JsonRedisSerializer(mapper);
@@ -48,6 +53,8 @@ public class RedisCacheConfig {
             builder.withCacheConfiguration(definition.getName(), configuration);
         });
 
-        return new LoggingCacheManager(builder.build());
+        RedisCacheManager redisCacheManager = builder.build();
+        redisCacheManager.afterPropertiesSet();
+        return new LoggingCacheManager(redisCacheManager);
     }
 }

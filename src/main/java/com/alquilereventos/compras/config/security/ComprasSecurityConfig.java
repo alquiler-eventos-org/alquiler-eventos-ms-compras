@@ -30,9 +30,15 @@ public class ComprasSecurityConfig {
         if (secret == null || secret.isBlank()) {
             throw new IllegalStateException("SECURITY_JWT_SECRET es obligatorio");
         }
-        SecretKey key = new SecretKeySpec(Base64.getDecoder().decode(secret), "HmacSHA256");
-        NimbusJwtDecoder decoder = NimbusJwtDecoder.withSecretKey(key)
-                .macAlgorithm(macAlgorithm(algorithm)).build();
+        byte[] keyBytes;
+        try {
+            keyBytes = Base64.getDecoder().decode(secret.trim());
+        } catch (IllegalArgumentException ex) {
+            throw new IllegalStateException("SECURITY_JWT_SECRET debe estar codificado en Base64");
+        }
+        MacAlgorithm mac = macAlgorithm(algorithm);
+        SecretKey key = new SecretKeySpec(keyBytes, "HmacSHA" + mac.getName().substring(2));
+        NimbusJwtDecoder decoder = NimbusJwtDecoder.withSecretKey(key).macAlgorithm(mac).build();
         decoder.setJwtValidator(JwtValidators.createDefaultWithIssuer(issuer));
         return decoder;
     }

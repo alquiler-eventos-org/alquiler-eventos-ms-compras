@@ -37,6 +37,8 @@ spring:
 
 server:
   port: ${SERVER_PORT:8082}
+  # Permite que springdoc respete los headers X-Forwarded-* del API Gateway.
+  forward-headers-strategy: ${SERVER_FORWARD_HEADERS_STRATEGY:framework}
   servlet:
     context-path: ${API_CONTEXT_PATH:/api}
 
@@ -63,7 +65,9 @@ app:
   # el API Gateway (http://localhost:8080/api) en vez de al microservicio
   # directo. Si no se define, queda con su propia URL (modo standalone).
   openapi:
-    server-url: ${OPENAPI_SERVER_URL:http://localhost:8082/api}
+    # Swagger unificado se sirve desde el Gateway: "Try it out" debe volver
+    # por :8080 y no llamar al micro directo (evita CORS y prueba el filtro).
+    server-url: ${OPENAPI_SERVER_URL:http://localhost:8080/api}
     title: ${OPENAPI_TITLE:MS Compras - Proveedores y Ordenes de Compra}
     description: ${OPENAPI_DESCRIPTION:Microservicio de compras (entrega 3, con JWT y cache Redis) del sistema de alquiler de equipos para eventos}
   cache:
