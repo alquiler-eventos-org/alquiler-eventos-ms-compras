@@ -1,5 +1,6 @@
 package com.alquilereventos.compras.service;
 
+import com.alquilereventos.common.dto.CondicionPago;
 import com.alquilereventos.common.dto.OrdenCompra;
 import com.alquilereventos.common.dto.OrdenCompraCrearRequest;
 import com.alquilereventos.common.dto.OrdenCompraDetalle;
@@ -42,10 +43,12 @@ import java.util.List;
 /**
  * Logica de negocio de ordenes de compra.
  *
- * <p>Reglas: el servidor calcula subtotales y total (el cliente no los manda);
- * estado inicial PENDIENTE; transiciones PENDIENTE-&gt;CONFIRMADA,
- * CONFIRMADA-&gt;RECIBIDA (suma stock) y PENDIENTE-&gt;ANULADA (borrado logico);
- * todo cambio de estado queda en el historial (herencia de HistorialEstado).</p>
+ * <p>Reglas: el servidor calcula subtotales y total (el cliente no los manda).
+ * La orden es una FACTURA DE COMPRA: al crearla queda RECIBIDA y suma el stock
+ * en el mismo momento (sin estados intermedios); exige numero de factura, RUC o CI
+ * y condicion de pago (CREDITO pide fecha de vencimiento). Las ordenes antiguas
+ * PENDIENTE/CONFIRMADA conservan sus transiciones (CONFIRMADA-&gt;RECIBIDA suma
+ * stock y PENDIENTE-&gt;ANULADA es borrado logico); todo queda en el historial.</p>
  */
 @Service
 public class OrdenCompraServiceImpl implements OrdenCompraService {
@@ -115,13 +118,16 @@ public class OrdenCompraServiceImpl implements OrdenCompraService {
         orden.setProveedor(proveedor);
         orden.setUsuario(usuario);
         orden.setFechaCompra(request.getFechaCompra() != null ? request.getFechaCompra() : LocalDate.now());
-        orden.setEstado(EstadoOrdenCompra.PENDIENTE);
+        aplicarDatosFactura(orden, request);
+        // Factura directa: nace RECIBIDA y suma el stock ahora mismo.
+        orden.setEstado(EstadoOrdenCompra.RECIBIDA);
         orden.setTotal(BigDecimal.ZERO);
         orden.setDetalles(new ArrayList<>());
 
         orden = cargarDetallesYTotal(orden, request.getDetalles());
+        sumarStock(orden);
         orden = ordenCompraRepository.save(orden);
-        registrarHistorial(orden, usuario, EstadoOrdenCompra.PENDIENTE, EstadoOrdenCompra.PENDIENTE);
+        registrarHistorial(orden, usuario, EstadoOrdenCompra.PENDIENTE, EstadoOrdenCompra.RECIBIDA);
         log.debug("Orden de compra {} creada con total {}", orden.getId(), orden.getTotal());
         return ordenCompraMapper.toDto(orden);
     }
@@ -148,6 +154,7 @@ public class OrdenCompraServiceImpl implements OrdenCompraService {
         if (request.getFechaCompra() != null) {
             orden.setFechaCompra(request.getFechaCompra());
         }
+        aplicarDatosFactura(orden, request);
 
         // Reemplazo completo de los detalles (cascade ALL + orphanRemoval).
         orden.getDetalles().clear();
@@ -232,6 +239,34 @@ public class OrdenCompraServiceImpl implements OrdenCompraService {
         if (request == null || request.getProveedorId() == null) {
             throw new ReglaNegocioException("Proveedor y detalles son obligatorios");
         }
+    }
+
+    /** Valida y copia los datos fiscales de la factura (numero, RUC/CI, condicion de pago). */
+    private void aplicarDatosFactura(com.alquilereventos.common.entity.OrdenCompra orden,
+                                     OrdenCompraCrearRequest request) {
+        String numero = request.getNumeroFactura() == null ? "" : request.getNumeroFactura().trim();
+        String ruc = request.getRuc() == null ? "" : request.getRuc().trim();
+        String ci = request.getCi() == null ? "" : request.getCi().trim();
+        if (numero.isEmpty()) {
+            throw new ReglaNegocioException("El numero de factura es obligatorio");
+        }
+        if (ruc.isEmpty() && ci.isEmpty()) {
+            throw new ReglaNegocioException("Debe indicar el RUC o la CI del proveedor");
+        }
+        if (request.getCondicionPago() == null) {
+            throw new ReglaNegocioException("La condicion de pago (CONTADO o CREDITO) es obligatoria");
+        }
+        if (request.getCondicionPago() == CondicionPago.CREDITO && request.getFechaVencimiento() == null) {
+            throw new ReglaNegocioException("Una factura a CREDITO necesita fecha de vencimiento");
+        }
+        orden.setNumeroFactura(numero);
+        orden.setRuc(ruc.isEmpty() ? null : ruc);
+        orden.setCi(ci.isEmpty() ? null : ci);
+        orden.setCondicionPago(request.getCondicionPago().name());
+        orden.setFechaVencimiento(
+                request.getCondicionPago() == CondicionPago.CREDITO ? request.getFechaVencimiento() : null);
+        String obs = request.getObservaciones() == null ? "" : request.getObservaciones().trim();
+        orden.setObservaciones(obs.isEmpty() ? null : obs);
     }
 
     private void validarDetalles(List<OrdenCompraDetalle> detalles) {

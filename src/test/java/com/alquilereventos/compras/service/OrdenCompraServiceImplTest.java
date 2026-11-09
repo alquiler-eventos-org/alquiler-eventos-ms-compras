@@ -1,5 +1,6 @@
 package com.alquilereventos.compras.service;
 
+import com.alquilereventos.common.dto.CondicionPago;
 import com.alquilereventos.common.dto.OrdenCompra;
 import com.alquilereventos.common.dto.OrdenCompraCrearRequest;
 import com.alquilereventos.common.dto.OrdenCompraDetalle;
@@ -99,6 +100,9 @@ class OrdenCompraServiceImplTest {
                                             List<OrdenCompraDetalle> detalles) {
         OrdenCompraCrearRequest request = new OrdenCompraCrearRequest();
         request.setProveedorId(proveedorId);
+        request.setNumeroFactura("001-001-0000123");
+        request.setRuc("80012345-6");
+        request.setCondicionPago(CondicionPago.CONTADO);
         request.setDetalles(detalles);
         return request;
     }
@@ -115,7 +119,7 @@ class OrdenCompraServiceImplTest {
     // ---------- crear ----------
 
     @Test
-    @DisplayName("crear: calcula subtotales y total en el servidor y queda PENDIENTE")
+    @DisplayName("crear: calcula subtotales y total, queda RECIBIDA y suma el stock al instante")
     void crearCalculaTotal() {
         stubsBasicosOk();
         OrdenCompraCrearRequest request = request(1, 2, List.of(
@@ -124,12 +128,40 @@ class OrdenCompraServiceImplTest {
 
         OrdenCompra dto = service.crear(request, 2);
 
-        assertEquals("PENDIENTE", dto.getEstado().name());
+        assertEquals("RECIBIDA", dto.getEstado().name());
+        assertEquals("001-001-0000123", dto.getNumeroFactura());
+        assertEquals(CondicionPago.CONTADO, dto.getCondicionPago());
+        verify(equipoRepository, times(2)).save(any());
         assertEquals(2, dto.getDetalles().size());
         assertEquals(100.50 * 2, dto.getDetalles().get(0).getSubtotal());
         assertEquals(251.00, dto.getTotal());
         verify(ordenCompraRepository).save(any());
         verify(historialRepository).save(any());
+    }
+
+    @Test
+    @DisplayName("crear: sin numero de factura lanza ReglaNegocioException")
+    void crearSinNumeroFactura() {
+        OrdenCompraCrearRequest request = request(1, 2, List.of(detalleDto(10, 1, 10.0)));
+        request.setNumeroFactura("  ");
+        assertThrows(ReglaNegocioException.class, () -> service.crear(request, 2));
+    }
+
+    @Test
+    @DisplayName("crear: sin RUC ni CI lanza ReglaNegocioException")
+    void crearSinRucNiCi() {
+        OrdenCompraCrearRequest request = request(1, 2, List.of(detalleDto(10, 1, 10.0)));
+        request.setRuc(null);
+        request.setCi(null);
+        assertThrows(ReglaNegocioException.class, () -> service.crear(request, 2));
+    }
+
+    @Test
+    @DisplayName("crear: CREDITO sin fecha de vencimiento lanza ReglaNegocioException")
+    void crearCreditoSinVencimiento() {
+        OrdenCompraCrearRequest request = request(1, 2, List.of(detalleDto(10, 1, 10.0)));
+        request.setCondicionPago(CondicionPago.CREDITO);
+        assertThrows(ReglaNegocioException.class, () -> service.crear(request, 2));
     }
 
     @Test

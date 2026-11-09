@@ -1,5 +1,6 @@
 package com.alquilereventos.compras.mapper;
 
+import com.alquilereventos.common.dto.CondicionPago;
 import com.alquilereventos.common.dto.EstadoOrdenCompra;
 import com.alquilereventos.common.dto.OrdenCompra;
 import com.alquilereventos.common.dto.OrdenCompraDetalle;
@@ -39,6 +40,14 @@ public class OrdenCompraMapper
             dto.setUsuarioId(entity.getUsuario().getId());
         }
         dto.setFechaCompra(entity.getFechaCompra());
+        dto.setNumeroFactura(entity.getNumeroFactura());
+        dto.setRuc(entity.getRuc());
+        dto.setCi(entity.getCi());
+        if (entity.getCondicionPago() != null) {
+            dto.setCondicionPago(CondicionPago.valueOf(entity.getCondicionPago()));
+        }
+        dto.setFechaVencimiento(entity.getFechaVencimiento());
+        dto.setObservaciones(entity.getObservaciones());
         if (entity.getEstado() != null) {
             dto.setEstado(EstadoOrdenCompra.valueOf(entity.getEstado().name()));
         }
