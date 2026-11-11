@@ -83,7 +83,7 @@ app:
       ordenes-compra:
         name: ${CACHE_ORDENES_COMPRA_NAME:compras:ordenes-compra}
         key-type: ${CACHE_ORDENES_COMPRA_KEY_TYPE:orden-compra}
-        ttl-seconds: ${CACHE_ORDENES_COMPRA_TTL_SECONDS:120}
+        ttl-seconds: ${CACHE_ORDENES_COMPRA_TTL_SECONDS:600}
   security:
     jwt:
       secret: ${SECURITY_JWT_SECRET:}
